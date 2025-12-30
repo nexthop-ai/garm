@@ -7,6 +7,7 @@ require (
 	github.com/alecthomas/chroma/v2 v2.27.0
 	github.com/bradleyfalzon/ghinstallation/v2 v2.19.0
 	github.com/cloudbase/garm-provider-common v0.1.10-0.20260707224136-4f5d9bf80949
+	github.com/coreos/go-oidc/v3 v3.18.0
 	github.com/felixge/httpsnoop v1.1.0
 	github.com/gdamore/tcell/v2 v2.13.10
 	github.com/go-gormigrate/gormigrate/v2 v2.1.6
@@ -55,6 +56,7 @@ require (
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/dlclark/regexp2/v2 v2.7.1 // indirect
 	github.com/gdamore/encoding v1.0.1 // indirect
+	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-openapi/analysis v1.0.0 // indirect
