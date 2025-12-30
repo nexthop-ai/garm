@@ -221,6 +221,14 @@ func initInfrastructure(ctx context.Context, cfg *config.Config, hub *websocket.
 
 func buildHTTPServer(ctx context.Context, cfg *config.Config, comp *serverComponents) (*http.Server, net.Listener, error) {
 	authenticator := auth.NewAuthenticator(cfg.JWTAuth, comp.db)
+
+	// Initialize OIDC if enabled
+	if cfg.OIDC.Enable {
+		if err := authenticator.InitOIDC(ctx, cfg.OIDC); err != nil {
+			return nil, nil, fmt.Errorf("initializing OIDC: %w", err)
+		}
+		slog.InfoContext(ctx, "OIDC authentication enabled", "issuer", cfg.OIDC.IssuerURL)
+	}
 	controller, err := controllers.NewAPIController(comp.runner, authenticator, comp.hub, comp.agentHub, comp.metricsHub, cfg.APIServer)
 	if err != nil {
 		return nil, nil, fmt.Errorf("creating API controller: %w", err)
