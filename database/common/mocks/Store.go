@@ -5640,6 +5640,64 @@ func (_c *Store_ListTemplates_Call) RunAndReturn(run func(context.Context, *garm
 	return _c
 }
 
+// ListUsers provides a mock function with given fields: ctx
+func (_m *Store) ListUsers(ctx context.Context) ([]params.User, error) {
+	ret := _m.Called(ctx)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListUsers")
+	}
+
+	var r0 []params.User
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context) ([]params.User, error)); ok {
+		return rf(ctx)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context) []params.User); ok {
+		r0 = rf(ctx)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]params.User)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = rf(ctx)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// Store_ListUsers_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListUsers'
+type Store_ListUsers_Call struct {
+	*mock.Call
+}
+
+// ListUsers is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *Store_Expecter) ListUsers(ctx interface{}) *Store_ListUsers_Call {
+	return &Store_ListUsers_Call{Call: _e.mock.On("ListUsers", ctx)}
+}
+
+func (_c *Store_ListUsers_Call) Run(run func(ctx context.Context)) *Store_ListUsers_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context))
+	})
+	return _c
+}
+
+func (_c *Store_ListUsers_Call) Return(_a0 []params.User, _a1 error) *Store_ListUsers_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *Store_ListUsers_Call) RunAndReturn(run func(context.Context) ([]params.User, error)) *Store_ListUsers_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // LockJob provides a mock function with given fields: ctx, jobID, entityID
 func (_m *Store) LockJob(ctx context.Context, jobID int64, entityID string) error {
 	ret := _m.Called(ctx, jobID, entityID)
