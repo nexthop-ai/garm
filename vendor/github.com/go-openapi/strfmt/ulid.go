@@ -14,17 +14,16 @@ import (
 	"github.com/oklog/ulid/v2"
 )
 
-// ULID represents a [ulid] string format.
-//
-// # Reference
+// ULID represents a [ulid] string format
+// ref:
 //
 //	https://github.com/ulid/spec
 //
-// # Implementation
+// impl:
 //
 //	https://github.com/oklog/ulid
 //
-// swagger:strfmt ulid.
+// swagger:[strfmt] [ulid]
 type ULID struct {
 	ulid.ULID
 }

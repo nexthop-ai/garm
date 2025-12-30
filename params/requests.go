@@ -157,6 +157,9 @@ type NewUserParams struct {
 	Password string `json:"password,omitempty"`
 	IsAdmin  bool   `json:"-"`
 	Enabled  bool   `json:"-"`
+	// IsSSOUser indicates this user authenticates via SSO (OIDC/SAML)
+	// and does not have a local password
+	IsSSOUser bool `json:"-"`
 }
 
 // swagger:model UpdatePoolParams
