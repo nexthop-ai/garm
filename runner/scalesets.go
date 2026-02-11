@@ -294,3 +294,71 @@ func (r *Runner) ListEntityScaleSets(ctx context.Context, entityType params.Forg
 	}
 	return scaleSets, nil
 }
+
+// ListGithubScaleSets lists all scale sets directly from GitHub for an entity.
+// This is useful for finding orphaned scale sets that exist in GitHub but not in GARM's database.
+func (r *Runner) ListGithubScaleSets(ctx context.Context, entityType params.ForgeEntityType, entityID string) (*params.RunnerScaleSetsResponse, error) {
+	if !auth.IsAdmin(ctx) {
+		return nil, runnerErrors.ErrUnauthorized
+	}
+
+	entity, err := r.store.GetForgeEntity(ctx, entityType, entityID)
+	if err != nil {
+		return nil, fmt.Errorf("error getting entity: %w", err)
+	}
+
+	if entity.Credentials.ForgeType != params.GithubEndpointType {
+		return nil, runnerErrors.NewBadRequestError("scale sets are only supported for github entities")
+	}
+
+	ghCli, err := github.Client(ctx, entity)
+	if err != nil {
+		return nil, fmt.Errorf("error creating github client: %w", err)
+	}
+
+	scalesetCli, err := scalesets.NewClient(ghCli)
+	if err != nil {
+		return nil, fmt.Errorf("error getting scaleset client: %w", err)
+	}
+
+	scaleSets, err := scalesetCli.ListRunnerScaleSets(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("error listing github scale sets: %w", err)
+	}
+
+	return scaleSets, nil
+}
+
+// DeleteGithubScaleSet deletes a scale set directly from GitHub by its GitHub ID.
+// This is useful for cleaning up orphaned scale sets that exist in GitHub but not in GARM's database.
+func (r *Runner) DeleteGithubScaleSet(ctx context.Context, entityType params.ForgeEntityType, entityID string, githubScaleSetID int) error {
+	if !auth.IsAdmin(ctx) {
+		return runnerErrors.ErrUnauthorized
+	}
+
+	entity, err := r.store.GetForgeEntity(ctx, entityType, entityID)
+	if err != nil {
+		return fmt.Errorf("error getting entity: %w", err)
+	}
+
+	if entity.Credentials.ForgeType != params.GithubEndpointType {
+		return runnerErrors.NewBadRequestError("scale sets are only supported for github entities")
+	}
+
+	ghCli, err := github.Client(ctx, entity)
+	if err != nil {
+		return fmt.Errorf("error creating github client: %w", err)
+	}
+
+	scalesetCli, err := scalesets.NewClient(ghCli)
+	if err != nil {
+		return fmt.Errorf("error getting scaleset client: %w", err)
+	}
+
+	if err := scalesetCli.DeleteRunnerScaleSet(ctx, githubScaleSetID); err != nil {
+		return fmt.Errorf("error deleting github scale set: %w", err)
+	}
+
+	slog.InfoContext(ctx, "deleted orphaned github scale set", "github_scaleset_id", githubScaleSetID)
+	return nil
+}
