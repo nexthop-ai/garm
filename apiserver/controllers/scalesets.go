@@ -209,3 +209,110 @@ func (a *APIController) UpdateScaleSetByIDHandler(w http.ResponseWriter, r *http
 		slog.With(slog.Any("error", err)).ErrorContext(ctx, "failed to encode response")
 	}
 }
+
+// swagger:route GET /organizations/{orgID}/github-scalesets organizations ListOrgGithubScaleSets
+//
+// List all scalesets from GitHub for an organization.
+// This lists scalesets directly from GitHub, not from GARM's database.
+// Useful for finding orphaned scalesets.
+//
+//	Parameters:
+//	  + name: orgID
+//	    description: Organization ID.
+//	    type: string
+//	    in: path
+//	    required: true
+//
+//	Responses:
+//	  200: RunnerScaleSetsResponse
+//	  default: APIErrorResponse
+func (a *APIController) ListOrgGithubScaleSetsHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	vars := mux.Vars(r)
+	orgID, ok := vars["orgID"]
+	if !ok {
+		w.WriteHeader(http.StatusBadRequest)
+		if err := json.NewEncoder(w).Encode(params.APIErrorResponse{
+			Error:   "Bad Request",
+			Details: "No org ID specified",
+		}); err != nil {
+			slog.With(slog.Any("error", err)).ErrorContext(ctx, "failed to encode response")
+		}
+		return
+	}
+
+	scaleSets, err := a.r.ListGithubScaleSets(ctx, runnerParams.ForgeEntityTypeOrganization, orgID)
+	if err != nil {
+		slog.With(slog.Any("error", err)).ErrorContext(ctx, "listing github scale sets")
+		handleError(ctx, w, err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(scaleSets); err != nil {
+		slog.With(slog.Any("error", err)).ErrorContext(ctx, "failed to encode response")
+	}
+}
+
+// swagger:route DELETE /organizations/{orgID}/github-scalesets/{scalesetID} organizations DeleteOrgGithubScaleSet
+//
+// Delete a scaleset directly from GitHub.
+// This is useful for cleaning up orphaned scalesets.
+//
+//	Parameters:
+//	  + name: orgID
+//	    description: Organization ID.
+//	    type: string
+//	    in: path
+//	    required: true
+//	  + name: scalesetID
+//	    description: GitHub scaleset ID (not GARM ID).
+//	    type: integer
+//	    in: path
+//	    required: true
+//
+//	Responses:
+//	  204: empty
+//	  default: APIErrorResponse
+func (a *APIController) DeleteOrgGithubScaleSetHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	vars := mux.Vars(r)
+	orgID, ok := vars["orgID"]
+	if !ok {
+		w.WriteHeader(http.StatusBadRequest)
+		if err := json.NewEncoder(w).Encode(params.APIErrorResponse{
+			Error:   "Bad Request",
+			Details: "No org ID specified",
+		}); err != nil {
+			slog.With(slog.Any("error", err)).ErrorContext(ctx, "failed to encode response")
+		}
+		return
+	}
+
+	scalesetIDStr, ok := vars["scalesetID"]
+	if !ok {
+		w.WriteHeader(http.StatusBadRequest)
+		if err := json.NewEncoder(w).Encode(params.APIErrorResponse{
+			Error:   "Bad Request",
+			Details: "No scaleset ID specified",
+		}); err != nil {
+			slog.With(slog.Any("error", err)).ErrorContext(ctx, "failed to encode response")
+		}
+		return
+	}
+
+	scalesetID, err := strconv.ParseInt(scalesetIDStr, 10, 32)
+	if err != nil {
+		slog.With(slog.Any("error", err)).ErrorContext(ctx, "failed to parse scaleset ID")
+		handleError(ctx, w, gErrors.ErrBadRequest)
+		return
+	}
+
+	if err := a.r.DeleteGithubScaleSet(ctx, runnerParams.ForgeEntityTypeOrganization, orgID, int(scalesetID)); err != nil {
+		slog.With(slog.Any("error", err)).ErrorContext(ctx, "deleting github scale set")
+		handleError(ctx, w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}

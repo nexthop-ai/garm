@@ -435,6 +435,14 @@ func NewAPIRouter(han *controllers.APIController, authMiddleware, initMiddleware
 	apiRouter.Handle("/organizations/{orgID}/scalesets/", http.HandlerFunc(han.ListOrgScaleSetsHandler)).Methods("GET", "OPTIONS")
 	apiRouter.Handle("/organizations/{orgID}/scalesets", http.HandlerFunc(han.ListOrgScaleSetsHandler)).Methods("GET", "OPTIONS")
 
+	// List GitHub scale sets (directly from GitHub, not GARM database)
+	apiRouter.Handle("/organizations/{orgID}/github-scalesets/", http.HandlerFunc(han.ListOrgGithubScaleSetsHandler)).Methods("GET", "OPTIONS")
+	apiRouter.Handle("/organizations/{orgID}/github-scalesets", http.HandlerFunc(han.ListOrgGithubScaleSetsHandler)).Methods("GET", "OPTIONS")
+
+	// Delete GitHub scale set (directly from GitHub)
+	apiRouter.Handle("/organizations/{orgID}/github-scalesets/{scalesetID}/", http.HandlerFunc(han.DeleteOrgGithubScaleSetHandler)).Methods("DELETE", "OPTIONS")
+	apiRouter.Handle("/organizations/{orgID}/github-scalesets/{scalesetID}", http.HandlerFunc(han.DeleteOrgGithubScaleSetHandler)).Methods("DELETE", "OPTIONS")
+
 	// Org instances list
 	apiRouter.Handle("/organizations/{orgID}/instances/", http.HandlerFunc(han.ListOrgInstancesHandler)).Methods("GET", "OPTIONS")
 	apiRouter.Handle("/organizations/{orgID}/instances", http.HandlerFunc(han.ListOrgInstancesHandler)).Methods("GET", "OPTIONS")
