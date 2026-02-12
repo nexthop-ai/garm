@@ -24,9 +24,11 @@ import (
 )
 
 // CollectJobMetric collects the metrics for the jobs recorded by GARM
+// aggregating by status and entity (org/repo/enterprise).
 func CollectJobMetric(ctx context.Context, r *runner.Runner) error {
 	// reset metrics
 	metrics.JobStatus.Reset()
+	metrics.JobCount.Reset()
 
 	jobs, err := r.ListAllJobs(ctx)
 	if err != nil {
@@ -48,5 +50,49 @@ func CollectJobMetric(ctx context.Context, r *runner.Runner) error {
 			strings.Join(job.Labels, " "),        // label: requested_labels
 		).Set(1)
 	}
+
+	// Aggregate counts by status and entity
+	type countKey struct {
+		Status     string
+		EntityType string
+		EntityName string
+	}
+	counts := make(map[countKey]int)
+
+	for _, job := range jobs {
+		// Determine entity type and name
+		var entityType, entityName string
+		switch {
+		case job.OrgID != nil:
+			entityType = "organization"
+			entityName = job.RepositoryOwner // org name is in RepositoryOwner for org-level jobs
+		case job.RepoID != nil:
+			entityType = "repository"
+			entityName = job.RepositoryOwner + "/" + job.RepositoryName
+		case job.EnterpriseID != nil:
+			entityType = "enterprise"
+			entityName = job.RepositoryOwner
+		default:
+			entityType = "unknown"
+			entityName = "unknown"
+		}
+
+		key := countKey{
+			Status:     job.Status,
+			EntityType: entityType,
+			EntityName: entityName,
+		}
+		counts[key]++
+	}
+
+	// Emit aggregate counts
+	for key, count := range counts {
+		metrics.JobCount.WithLabelValues(
+			key.Status,     // label: status
+			key.EntityType, // label: entity_type
+			key.EntityName, // label: entity_name
+		).Set(float64(count))
+	}
+
 	return nil
 }

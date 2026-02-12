@@ -21,8 +21,8 @@ github.com/chzyer/readline
 # github.com/clipperhouse/uax29/v2 v2.7.0
 ## explicit; go 1.18
 github.com/clipperhouse/uax29/v2/graphemes
-# github.com/cloudbase/garm-provider-common v0.1.8
-## explicit; go 1.23.0
+# github.com/cloudbase/garm-provider-common v0.1.9-0.20260410151520-0e7768ad5979
+## explicit; go 1.25.0
 github.com/cloudbase/garm-provider-common/cloudconfig
 github.com/cloudbase/garm-provider-common/defaults
 github.com/cloudbase/garm-provider-common/errors
@@ -358,7 +358,7 @@ golang.org/x/crypto/internal/poly1305
 # golang.org/x/mod v0.34.0
 ## explicit; go 1.25.0
 golang.org/x/mod/semver
-# golang.org/x/net v0.51.0
+# golang.org/x/net v0.52.0
 ## explicit; go 1.25.0
 golang.org/x/net/idna
 golang.org/x/net/internal/socks
