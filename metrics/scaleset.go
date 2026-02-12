@@ -27,4 +27,24 @@ var (
 		Name:      "status",
 		Help:      "Status of each scaleset (1=enabled, 0=disabled)",
 	}, []string{"name", "state", "entity_type", "entity_name", "provider"})
+
+	// ScaleSetRunnerCount counts runner instances per scaleset, broken down by
+	// instance status and runner status. Use this to track per-scaleset capacity
+	// and utilization.
+	ScaleSetRunnerCount = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: metricsNamespace,
+		Subsystem: metricsScaleSetSubsystem,
+		Name:      "runner_count",
+		Help:      "Count of runner instances per scaleset by status",
+	}, []string{"scaleset_name", "status", "runner_status", "provider"})
+
+	// ScaleSetJobCount counts jobs per scaleset, broken down by job status.
+	// Use this to monitor job queue depth per scaleset and decide when to
+	// increase max_runners.
+	ScaleSetJobCount = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: metricsNamespace,
+		Subsystem: metricsScaleSetSubsystem,
+		Name:      "job_count",
+		Help:      "Count of jobs per scaleset by status",
+	}, []string{"scaleset_name", "status"})
 )

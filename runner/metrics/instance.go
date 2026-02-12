@@ -28,6 +28,7 @@ func CollectInstanceMetric(ctx context.Context, r *runner.Runner) error {
 	// reset metrics
 	metrics.InstanceStatus.Reset()
 	metrics.InstanceCount.Reset()
+	metrics.ScaleSetRunnerCount.Reset()
 
 	instances, err := r.ListAllInstances(ctx)
 	if err != nil {
@@ -48,6 +49,7 @@ func CollectInstanceMetric(ctx context.Context, r *runner.Runner) error {
 		Name         string
 		Type         string
 		ProviderName string
+		ScaleSetName string // non-empty only for scaleset instances
 	}
 
 	// Build lookup maps for pools and scalesets
@@ -83,18 +85,21 @@ func CollectInstanceMetric(ctx context.Context, r *runner.Runner) error {
 				Name:         ss.OrgName,
 				Type:         "organization",
 				ProviderName: ss.ProviderName,
+				ScaleSetName: ss.Name,
 			}
 		case ss.EnterpriseName != "":
 			scalesetInfo[ss.ID] = entityInfo{
 				Name:         ss.EnterpriseName,
 				Type:         "enterprise",
 				ProviderName: ss.ProviderName,
+				ScaleSetName: ss.Name,
 			}
 		default:
 			scalesetInfo[ss.ID] = entityInfo{
 				Name:         ss.RepoName,
 				Type:         "repository",
 				ProviderName: ss.ProviderName,
+				ScaleSetName: ss.Name,
 			}
 		}
 	}
@@ -108,6 +113,15 @@ func CollectInstanceMetric(ctx context.Context, r *runner.Runner) error {
 		Provider     string
 	}
 	counts := make(map[countKey]int)
+
+	// Aggregate counts by scaleset name/status/runner_status/provider
+	type scalesetCountKey struct {
+		ScaleSetName string
+		Status       string
+		RunnerStatus string
+		Provider     string
+	}
+	scalesetCounts := make(map[scalesetCountKey]int)
 
 	for _, instance := range instances {
 		var info entityInfo
@@ -138,7 +152,7 @@ func CollectInstanceMetric(ctx context.Context, r *runner.Runner) error {
 			info.ProviderName,             // label: provider
 		).Set(1)
 
-		// Aggregate count
+		// Aggregate count by owner/type/provider
 		key := countKey{
 			Status:       string(instance.Status),
 			RunnerStatus: string(instance.RunnerStatus),
@@ -147,6 +161,17 @@ func CollectInstanceMetric(ctx context.Context, r *runner.Runner) error {
 			Provider:     info.ProviderName,
 		}
 		counts[key]++
+
+		// Aggregate count by scaleset
+		if info.ScaleSetName != "" {
+			ssKey := scalesetCountKey{
+				ScaleSetName: info.ScaleSetName,
+				Status:       string(instance.Status),
+				RunnerStatus: string(instance.RunnerStatus),
+				Provider:     info.ProviderName,
+			}
+			scalesetCounts[ssKey]++
+		}
 	}
 
 	// Emit aggregate counts (low cardinality)
@@ -156,6 +181,16 @@ func CollectInstanceMetric(ctx context.Context, r *runner.Runner) error {
 			key.RunnerStatus, // label: runner_status
 			key.PoolOwner,    // label: pool_owner
 			key.PoolType,     // label: pool_type
+			key.Provider,     // label: provider
+		).Set(float64(count))
+	}
+
+	// Emit per-scaleset runner counts
+	for key, count := range scalesetCounts {
+		metrics.ScaleSetRunnerCount.WithLabelValues(
+			key.ScaleSetName, // label: scaleset_name
+			key.Status,       // label: status
+			key.RunnerStatus, // label: runner_status
 			key.Provider,     // label: provider
 		).Set(float64(count))
 	}
