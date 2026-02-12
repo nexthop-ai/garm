@@ -44,6 +44,7 @@ func RegisterMetrics() error {
 		//
 		// runner metrics
 		InstanceStatus,
+		InstanceCount,
 		// organization metrics
 		OrganizationInfo,
 		OrganizationPoolManagerStatus,
@@ -62,12 +63,7 @@ func RegisterMetrics() error {
 		PoolMinIdleRunners,
 		PoolBootstrapTimeout,
 		// scale set metrics
-		ScaleSetInfo,
 		ScaleSetStatus,
-		ScaleSetMaxRunners,
-		ScaleSetMinIdleRunners,
-		ScaleSetDesiredRunnerCount,
-		ScaleSetBootstrapTimeout,
 		// health metrics
 		GarmHealth,
 
@@ -113,6 +109,8 @@ func RegisterMetrics() error {
 		WatcherNotifyTimeoutsCount,
 		// build info
 		BuildInfo,
+		// job queue metrics
+		JobCount,
 	)
 
 	for _, c := range collectors {

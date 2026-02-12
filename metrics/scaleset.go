@@ -1,4 +1,4 @@
-// Copyright 2026 Cloudbase Solutions SRL
+// Copyright 2025 Cloudbase Solutions SRL
 //
 //    Licensed under the Apache License, Version 2.0 (the "License"); you may
 //    not use this file except in compliance with the License. You may obtain
@@ -19,45 +19,12 @@ import (
 )
 
 var (
-	ScaleSetInfo = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-		Namespace: metricsNamespace,
-		Subsystem: metricsScaleSetSubsystem,
-		Name:      "info",
-		Help:      "Info of the scale set",
-	}, []string{"id", "scaleset_id", "name", "image", "flavor", "prefix", "os_type", "os_arch", "tags", "provider", "runner_group", "scaleset_owner", "scaleset_type"})
-
+	// ScaleSetStatus reports the status of each scaleset.
+	// The value is 1 if the scaleset is enabled, 0 if disabled.
 	ScaleSetStatus = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: metricsNamespace,
 		Subsystem: metricsScaleSetSubsystem,
 		Name:      "status",
-		Help:      "Status of the scale set",
-	}, []string{"id", "enabled", "state"})
-
-	ScaleSetMaxRunners = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-		Namespace: metricsNamespace,
-		Subsystem: metricsScaleSetSubsystem,
-		Name:      "max_runners",
-		Help:      "Maximum number of runners in the scale set",
-	}, []string{"id"})
-
-	ScaleSetMinIdleRunners = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-		Namespace: metricsNamespace,
-		Subsystem: metricsScaleSetSubsystem,
-		Name:      "min_idle_runners",
-		Help:      "Minimum number of idle runners in the scale set",
-	}, []string{"id"})
-
-	ScaleSetDesiredRunnerCount = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-		Namespace: metricsNamespace,
-		Subsystem: metricsScaleSetSubsystem,
-		Name:      "desired_runner_count",
-		Help:      "Desired runner count requested by GitHub for the scale set",
-	}, []string{"id"})
-
-	ScaleSetBootstrapTimeout = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-		Namespace: metricsNamespace,
-		Subsystem: metricsScaleSetSubsystem,
-		Name:      "bootstrap_timeout",
-		Help:      "Runner bootstrap timeout in the scale set",
-	}, []string{"id"})
+		Help:      "Status of each scaleset (1=enabled, 0=disabled)",
+	}, []string{"name", "state", "entity_type", "entity_name", "provider"})
 )
