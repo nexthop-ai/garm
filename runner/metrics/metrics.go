@@ -107,20 +107,8 @@ func collectMetrics(ctx context.Context, r *runner.Runner, controllerInfo params
 		return err
 	}
 
-	slog.DebugContext(ctx, "collecting scaleset metrics")
-	err = CollectScaleSetMetric(ctx, r)
-	if err != nil {
-		return err
-	}
-
 	slog.DebugContext(ctx, "collecting health metrics")
 	err = CollectHealthMetric(controllerInfo)
-	if err != nil {
-		return err
-	}
-
-	slog.DebugContext(ctx, "collecting jobs metrics")
-	err = CollectJobMetric(ctx, r)
 	if err != nil {
 		return err
 	}

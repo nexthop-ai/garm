@@ -64,6 +64,8 @@ func RegisterMetrics() error {
 		PoolBootstrapTimeout,
 		// scale set metrics
 		ScaleSetStatus,
+		ScaleSetRunnerCount,
+		ScaleSetJobCount,
 		// health metrics
 		GarmHealth,
 

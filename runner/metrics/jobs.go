@@ -29,10 +29,21 @@ func CollectJobMetric(ctx context.Context, r *runner.Runner) error {
 	// reset metrics
 	metrics.JobStatus.Reset()
 	metrics.JobCount.Reset()
+	metrics.ScaleSetJobCount.Reset()
 
 	jobs, err := r.ListAllJobs(ctx)
 	if err != nil {
 		return err
+	}
+
+	// Build a set of known scaleset names for reliable label matching.
+	scalesets, err := r.ListAllScaleSets(ctx)
+	if err != nil {
+		return err
+	}
+	knownScaleSets := make(map[string]struct{}, len(scalesets))
+	for _, ss := range scalesets {
+		knownScaleSets[ss.Name] = struct{}{}
 	}
 
 	for _, job := range jobs {
@@ -59,6 +70,16 @@ func CollectJobMetric(ctx context.Context, r *runner.Runner) error {
 	}
 	counts := make(map[countKey]int)
 
+	// Aggregate scaleset job counts by scaleset name and status.
+	// Scaleset jobs are identified by a non-empty ScaleSetJobID.
+	// The scaleset name is the first requested label (the GitHub "System" label
+	// that workflows reference in runs-on), validated against the known scalesets.
+	type scalesetJobKey struct {
+		ScaleSetName string
+		Status       string
+	}
+	scalesetJobCounts := make(map[scalesetJobKey]int)
+
 	for _, job := range jobs {
 		// Determine entity type and name
 		var entityType, entityName string
@@ -83,6 +104,17 @@ func CollectJobMetric(ctx context.Context, r *runner.Runner) error {
 			EntityName: entityName,
 		}
 		counts[key]++
+
+		// Count scaleset jobs by scaleset name. The scaleset name is Labels[0].
+		if job.ScaleSetJobID != "" && len(job.Labels) > 0 {
+			if _, ok := knownScaleSets[job.Labels[0]]; ok {
+				ssKey := scalesetJobKey{
+					ScaleSetName: job.Labels[0],
+					Status:       job.Status,
+				}
+				scalesetJobCounts[ssKey]++
+			}
+		}
 	}
 
 	// Emit aggregate counts
@@ -91,6 +123,14 @@ func CollectJobMetric(ctx context.Context, r *runner.Runner) error {
 			key.Status,     // label: status
 			key.EntityType, // label: entity_type
 			key.EntityName, // label: entity_name
+		).Set(float64(count))
+	}
+
+	// Emit per-scaleset job counts
+	for key, count := range scalesetJobCounts {
+		metrics.ScaleSetJobCount.WithLabelValues(
+			key.ScaleSetName, // label: scaleset_name
+			key.Status,       // label: status
 		).Set(float64(count))
 	}
 
