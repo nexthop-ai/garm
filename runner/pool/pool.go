@@ -41,6 +41,7 @@ import (
 	"github.com/cloudbase/garm/database/watcher"
 	garmErrors "github.com/cloudbase/garm/internal/errors"
 	"github.com/cloudbase/garm/locking"
+	"github.com/cloudbase/garm/metrics"
 	"github.com/cloudbase/garm/params"
 	"github.com/cloudbase/garm/runner/common"
 	garmUtil "github.com/cloudbase/garm/util"
@@ -69,6 +70,11 @@ const (
 	// nolint:golangci-lint,godox
 	// TODO: make this configurable(?)
 	maxCreateAttempts = 5
+
+	// Actions sent by the forge on workflow_job webhooks.
+	jobActionQueued     = "queued"
+	jobActionInProgress = "in_progress"
+	jobActionCompleted  = "completed"
 )
 
 func NewEntityPoolManager(ctx context.Context, entity params.ForgeEntity, instanceTokenGetter auth.InstanceTokenGetter, providers map[string]common.Provider, store dbCommon.Store) (common.PoolManager, error) {
@@ -440,7 +446,7 @@ func (r *basePoolManager) HandleWorkflowJob(job params.WorkflowJob) error {
 
 	// For in_progress/completed jobs, check if the runner belongs to a scale set.
 	// Scale set jobs are handled by the scale set listener, not by webhooks.
-	if job.Action == "in_progress" || job.Action == "completed" {
+	if job.Action == jobActionInProgress || job.Action == jobActionCompleted {
 		if jobParams.RunnerName != "" {
 			instance, err := r.store.GetInstance(ctx, jobParams.RunnerName)
 			if err == nil && instance.ScaleSetID != 0 {
@@ -459,6 +465,16 @@ func (r *basePoolManager) HandleWorkflowJob(job params.WorkflowJob) error {
 		}
 	}
 
+	// The job reached a runner. Record the queue latency using the forge's own
+	// timestamps; webhooks can be delayed and our clock is not authoritative.
+	// Scale set jobs never get here (they returned above) and are accounted for
+	// by the scale set listener instead, so there is no double counting.
+	if job.Action == jobActionInProgress {
+		metrics.ObserveJobQueueDuration(
+			metrics.JobQueueSourceWebhook, job.WorkflowJob.Labels,
+			job.WorkflowJob.CreatedAt, job.WorkflowJob.StartedAt)
+	}
+
 	// Validate and persist job to database first, then act on it.
 	if err := r.persistJobToDB(ctx, jobParams); err != nil {
 		return err
@@ -468,9 +484,9 @@ func (r *basePoolManager) HandleWorkflowJob(job params.WorkflowJob) error {
 	var actionErr error
 
 	switch job.Action {
-	case "queued":
+	case jobActionQueued:
 		// Queued jobs are just recorded; they'll be picked up by consumeQueuedJobs()
-	case "in_progress":
+	case jobActionInProgress:
 		triggeredBy, inProgressErr := r.handleInProgressJob(ctx, jobParams)
 		actionErr = inProgressErr
 		// Break lock on the queued job that originally triggered this runner.
@@ -481,7 +497,7 @@ func (r *basePoolManager) HandleWorkflowJob(job params.WorkflowJob) error {
 					"job_id", triggeredBy)
 			}
 		}
-	case "completed":
+	case jobActionCompleted:
 		actionErr = r.handleCompletedJob(ctx, jobParams)
 	}
 

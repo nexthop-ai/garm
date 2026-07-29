@@ -24,6 +24,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
@@ -34,6 +36,7 @@ import (
 	"github.com/cloudbase/garm/database/watcher"
 	garmTesting "github.com/cloudbase/garm/internal/testing"
 	"github.com/cloudbase/garm/locking"
+	"github.com/cloudbase/garm/metrics"
 	"github.com/cloudbase/garm/params"
 	"github.com/cloudbase/garm/runner/common"
 	runnerCommonMocks "github.com/cloudbase/garm/runner/common/mocks"
@@ -788,6 +791,116 @@ func (s *PoolStressTestSuite) TestPersistJobToDB_AllowsForwardTransitions() {
 			s.Require().NoError(err, "expected transition %s->%s to pass validation", tt.seedAction, tt.nextAction)
 		})
 	}
+}
+
+// jobQueueDurationSamples returns the sample count and sum recorded on the
+// garm_job_queue_duration_seconds histogram for the webhook source.
+func (s *PoolStressTestSuite) jobQueueDurationSamples(runnerLabels []string) (uint64, float64) {
+	observer, err := metrics.JobQueueDuration.GetMetricWithLabelValues(
+		metrics.NormalizeRunnerLabels(runnerLabels), metrics.JobQueueSourceWebhook)
+	s.Require().NoError(err)
+
+	var pb dto.Metric
+	s.Require().NoError(observer.(prometheus.Metric).Write(&pb))
+	return pb.GetHistogram().GetSampleCount(), pb.GetHistogram().GetSampleSum()
+}
+
+// TestHandleWorkflowJobObservesQueueDuration verifies that an in_progress
+// webhook records the forge reported queue latency, and that queued and
+// completed webhooks for the same job do not add extra observations.
+func (s *PoolStressTestSuite) TestHandleWorkflowJobObservesQueueDuration() {
+	metrics.JobQueueDuration.Reset()
+	s.setupProviderMocks()
+
+	labels := []string{"self-hosted", "linux", "x64"}
+	createdAt := time.Date(2026, 7, 29, 10, 0, 0, 0, time.UTC)
+
+	queuedJob := s.makeWorkflowJob(2101, "queued", "queued", "", labels)
+	queuedJob.WorkflowJob.CreatedAt = createdAt
+	s.Require().NoError(s.mgr.HandleWorkflowJob(queuedJob))
+
+	count, _ := s.jobQueueDurationSamples(labels)
+	s.Equal(uint64(0), count, "queued webhooks must not be observed")
+
+	s.syncJobsFromDB()
+	s.Require().NoError(s.mgr.consumeQueuedJobs())
+
+	instances, err := s.store.ListPoolInstances(s.adminCtx, s.pool.ID, false)
+	s.Require().NoError(err)
+	s.Require().NotEmpty(instances)
+	runnerName := instances[0].Name
+
+	inProgressJob := s.makeWorkflowJob(2101, "in_progress", "in_progress", runnerName, labels)
+	inProgressJob.WorkflowJob.CreatedAt = createdAt
+	inProgressJob.WorkflowJob.StartedAt = createdAt.Add(7 * time.Minute)
+	s.Require().NoError(s.mgr.HandleWorkflowJob(inProgressJob))
+
+	count, sum := s.jobQueueDurationSamples(labels)
+	s.Equal(uint64(1), count)
+	s.InDelta(420.0, sum, 0.001, "expected started_at - created_at, in seconds")
+
+	completedJob := s.makeWorkflowJob(2101, "completed", "completed", runnerName, labels)
+	completedJob.WorkflowJob.CreatedAt = createdAt
+	completedJob.WorkflowJob.StartedAt = createdAt.Add(7 * time.Minute)
+	s.Require().NoError(s.mgr.HandleWorkflowJob(completedJob))
+
+	count, _ = s.jobQueueDurationSamples(labels)
+	s.Equal(uint64(1), count, "completed webhooks must not be observed")
+}
+
+// TestHandleWorkflowJobSkipsQueueDurationWithoutCreatedAt makes sure we never
+// substitute a local timestamp when the forge omits created_at.
+func (s *PoolStressTestSuite) TestHandleWorkflowJobSkipsQueueDurationWithoutCreatedAt() {
+	metrics.JobQueueDuration.Reset()
+
+	labels := []string{"self-hosted", "linux", "x64"}
+	job := s.makeWorkflowJob(2102, "in_progress", "in_progress", "", labels)
+	job.WorkflowJob.StartedAt = time.Date(2026, 7, 29, 10, 5, 0, 0, time.UTC)
+	// The job was never seen as queued, so persisting it is rejected. We only
+	// care that no bogus duration was recorded.
+	_ = s.mgr.HandleWorkflowJob(job)
+
+	count, _ := s.jobQueueDurationSamples(labels)
+	s.Equal(uint64(0), count)
+}
+
+// TestHandleWorkflowJobScaleSetJobNotObserved verifies that jobs picked up by a
+// scale set runner are not observed on the webhook path. Those are accounted
+// for by the scale set listener, which has the forge's own timestamps.
+func (s *PoolStressTestSuite) TestHandleWorkflowJobScaleSetJobNotObserved() {
+	metrics.JobQueueDuration.Reset()
+
+	scaleSet, err := s.store.CreateEntityScaleSet(s.adminCtx, s.entity, params.CreateScaleSetParams{
+		Name:         "test-scaleset",
+		ScaleSetID:   42,
+		ProviderName: "test-provider",
+		MaxRunners:   10,
+		Image:        "test-image",
+		Flavor:       "test-flavor",
+		OSType:       "linux",
+		OSArch:       "amd64",
+		Enabled:      true,
+	})
+	s.Require().NoError(err)
+
+	instance, err := s.store.CreateScaleSetInstance(s.adminCtx, scaleSet.ID, params.CreateInstanceParams{
+		Name:         "scaleset-runner-1",
+		OSType:       "linux",
+		OSArch:       "amd64",
+		Status:       commonParams.InstanceRunning,
+		RunnerStatus: params.RunnerIdle,
+	})
+	s.Require().NoError(err)
+
+	labels := []string{"self-hosted", "linux", "x64"}
+	createdAt := time.Date(2026, 7, 29, 10, 0, 0, 0, time.UTC)
+	job := s.makeWorkflowJob(2103, "in_progress", "in_progress", instance.Name, labels)
+	job.WorkflowJob.CreatedAt = createdAt
+	job.WorkflowJob.StartedAt = createdAt.Add(7 * time.Minute)
+	s.Require().NoError(s.mgr.HandleWorkflowJob(job))
+
+	count, _ := s.jobQueueDurationSamples(labels)
+	s.Equal(uint64(0), count, "scale set jobs must be skipped on the webhook path")
 }
 
 func mustParseUUID(s string) uuid.UUID {
