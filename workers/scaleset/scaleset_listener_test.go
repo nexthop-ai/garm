@@ -73,9 +73,9 @@ func newTestListener() *scaleSetListener {
 }
 
 func TestRecordStatistics(t *testing.T) {
-	metrics.ScaleSetAvailableJobs.Reset()
-	metrics.ScaleSetAssignedJobs.Reset()
-	metrics.ScaleSetIdleRunners.Reset()
+	metrics.ScaleSetGHAvailableJobs.Reset()
+	metrics.ScaleSetGHAssignedJobs.Reset()
+	metrics.ScaleSetGHIdleRunners.Reset()
 
 	l := newTestListener()
 	l.recordStatistics(&params.RunnerScaleSetStatistic{
@@ -86,25 +86,25 @@ func TestRecordStatistics(t *testing.T) {
 
 	lbls := []string{"test-scaleset", "test-provider"}
 
-	if got := gaugeValue(t, metrics.ScaleSetAvailableJobs, lbls...); got != 250 {
+	if got := gaugeValue(t, metrics.ScaleSetGHAvailableJobs, lbls...); got != 250 {
 		t.Errorf("available_jobs = %v, want 250", got)
 	}
-	if got := gaugeValue(t, metrics.ScaleSetAssignedJobs, lbls...); got != 10 {
+	if got := gaugeValue(t, metrics.ScaleSetGHAssignedJobs, lbls...); got != 10 {
 		t.Errorf("assigned_jobs = %v, want 10", got)
 	}
-	if got := gaugeValue(t, metrics.ScaleSetIdleRunners, lbls...); got != 3 {
+	if got := gaugeValue(t, metrics.ScaleSetGHIdleRunners, lbls...); got != 3 {
 		t.Errorf("idle_runners = %v, want 3", got)
 	}
 }
 
 func TestRecordStatisticsNilIsNoop(t *testing.T) {
-	metrics.ScaleSetAvailableJobs.Reset()
+	metrics.ScaleSetGHAvailableJobs.Reset()
 
 	l := newTestListener()
 	l.recordStatistics(nil)
 
 	ch := make(chan prometheus.Metric, 8)
-	metrics.ScaleSetAvailableJobs.Collect(ch)
+	metrics.ScaleSetGHAvailableJobs.Collect(ch)
 	close(ch)
 	if len(ch) != 0 {
 		t.Errorf("expected no series, got %d", len(ch))
@@ -114,7 +114,7 @@ func TestRecordStatisticsNilIsNoop(t *testing.T) {
 // TestHandleSessionMessageIgnoresNonJobMessagesButKeepsStatistics documents
 // that statistics ride along on every message, even ones we otherwise drop.
 func TestHandleSessionMessageIgnoresNonJobMessagesButKeepsStatistics(t *testing.T) {
-	metrics.ScaleSetAvailableJobs.Reset()
+	metrics.ScaleSetGHAvailableJobs.Reset()
 
 	l := newTestListener()
 	l.handleSessionMessage(params.RunnerScaleSetMessage{
@@ -125,7 +125,7 @@ func TestHandleSessionMessageIgnoresNonJobMessagesButKeepsStatistics(t *testing.
 		},
 	})
 
-	if got := gaugeValue(t, metrics.ScaleSetAvailableJobs, "test-scaleset", "test-provider"); got != 99 {
+	if got := gaugeValue(t, metrics.ScaleSetGHAvailableJobs, "test-scaleset", "test-provider"); got != 99 {
 		t.Errorf("available_jobs = %v, want 99", got)
 	}
 }

@@ -124,17 +124,17 @@ The `_info` gauges are always set to 1; the labels are what carry the informatio
 | `garm_scaleset_min_idle_runners` | Gauge | `id` |
 | `garm_scaleset_desired_runner_count` | Gauge | `id` |
 | `garm_scaleset_bootstrap_timeout` | Gauge | `id` |
-| `garm_scaleset_available_jobs` | Gauge | `scaleset_name`, `provider` |
-| `garm_scaleset_acquired_jobs` | Gauge | `scaleset_name`, `provider` |
-| `garm_scaleset_assigned_jobs` | Gauge | `scaleset_name`, `provider` |
-| `garm_scaleset_running_jobs` | Gauge | `scaleset_name`, `provider` |
-| `garm_scaleset_registered_runners` | Gauge | `scaleset_name`, `provider` |
-| `garm_scaleset_busy_runners` | Gauge | `scaleset_name`, `provider` |
-| `garm_scaleset_idle_runners` | Gauge | `scaleset_name`, `provider` |
+| `garm_scaleset_gh_available_jobs` | Gauge | `scaleset_name`, `provider` |
+| `garm_scaleset_gh_acquired_jobs` | Gauge | `scaleset_name`, `provider` |
+| `garm_scaleset_gh_assigned_jobs` | Gauge | `scaleset_name`, `provider` |
+| `garm_scaleset_gh_running_jobs` | Gauge | `scaleset_name`, `provider` |
+| `garm_scaleset_gh_registered_runners` | Gauge | `scaleset_name`, `provider` |
+| `garm_scaleset_gh_busy_runners` | Gauge | `scaleset_name`, `provider` |
+| `garm_scaleset_gh_idle_runners` | Gauge | `scaleset_name`, `provider` |
 
 The `id` label is GARM's internal scale set ID; `scaleset_id` is the numeric ID assigned by GitHub. `garm_scaleset_desired_runner_count` reflects the runner count GitHub has requested for the scale set (unique to scale sets, since GitHub drives scheduling).
 
-The last seven gauges are GitHub's own accounting, taken from the statistics GitHub attaches to every Actions message queue response, and are updated whenever the scale set listener receives a message (not on the snapshot tick). `garm_scaleset_available_jobs` is the metric to watch for queue depth: it is the number of jobs waiting on the forge side and, unlike anything derived from job messages, it is not capped by the runner capacity GARM advertises when it longpolls for messages. `garm_job_count{status="queued"}` and `garm_scaleset_job_count{status="queued"}` only count jobs GARM has been told about, so during saturation they understate the real backlog.
+The seven `gh_`-prefixed gauges are **GitHub's own accounting**, not GARM's: they are taken verbatim from the statistics GitHub attaches to every Actions message queue response, and are updated whenever the scale set listener receives a message (not on the snapshot tick). The prefix is there to keep them from being confused with GARM's own counts, such as `garm_scaleset_job_count` and `garm_scaleset_runner_count`, which can and do disagree with GitHub. `garm_scaleset_gh_available_jobs` is the metric to watch for queue depth: it is the number of jobs waiting on the forge side and, unlike anything derived from job messages, it is not capped by the runner capacity GARM advertises when it longpolls for messages. `garm_job_count{status="queued"}` and `garm_scaleset_job_count{status="queued"}` only count jobs GARM has been told about, so during saturation they understate the real backlog.
 
 #### Runner instances
 

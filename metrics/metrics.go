@@ -87,13 +87,13 @@ func RegisterMetrics() error {
 		// job queue latency, observed as jobs start
 		JobQueueDuration,
 		// scale set statistics, reported by GitHub on every message queue response
-		ScaleSetAvailableJobs,
-		ScaleSetAcquiredJobs,
-		ScaleSetAssignedJobs,
-		ScaleSetRunningJobs,
-		ScaleSetRegisteredRunners,
-		ScaleSetBusyRunners,
-		ScaleSetIdleRunners,
+		ScaleSetGHAvailableJobs,
+		ScaleSetGHAcquiredJobs,
+		ScaleSetGHAssignedJobs,
+		ScaleSetGHRunningJobs,
+		ScaleSetGHRegisteredRunners,
+		ScaleSetGHBusyRunners,
+		ScaleSetGHIdleRunners,
 	)
 
 	for _, c := range collectors {

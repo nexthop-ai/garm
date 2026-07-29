@@ -24,13 +24,13 @@ import (
 
 func scaleSetStatsGauges() map[string]*prometheus.GaugeVec {
 	return map[string]*prometheus.GaugeVec{
-		"available_jobs":     ScaleSetAvailableJobs,
-		"acquired_jobs":      ScaleSetAcquiredJobs,
-		"assigned_jobs":      ScaleSetAssignedJobs,
-		"running_jobs":       ScaleSetRunningJobs,
-		"registered_runners": ScaleSetRegisteredRunners,
-		"busy_runners":       ScaleSetBusyRunners,
-		"idle_runners":       ScaleSetIdleRunners,
+		"gh_available_jobs":     ScaleSetGHAvailableJobs,
+		"gh_acquired_jobs":      ScaleSetGHAcquiredJobs,
+		"gh_assigned_jobs":      ScaleSetGHAssignedJobs,
+		"gh_running_jobs":       ScaleSetGHRunningJobs,
+		"gh_registered_runners": ScaleSetGHRegisteredRunners,
+		"gh_busy_runners":       ScaleSetGHBusyRunners,
+		"gh_idle_runners":       ScaleSetGHIdleRunners,
 	}
 }
 
@@ -54,13 +54,13 @@ func TestRecordScaleSetStatistics(t *testing.T) {
 	})
 
 	wantValues := map[string]float64{
-		"available_jobs":     101,
-		"acquired_jobs":      7,
-		"assigned_jobs":      5,
-		"running_jobs":       4,
-		"registered_runners": 10,
-		"busy_runners":       4,
-		"idle_runners":       6,
+		"gh_available_jobs":     101,
+		"gh_acquired_jobs":      7,
+		"gh_assigned_jobs":      5,
+		"gh_running_jobs":       4,
+		"gh_registered_runners": 10,
+		"gh_busy_runners":       4,
+		"gh_idle_runners":       6,
 	}
 
 	key := "provider=test-provider|scaleset_name=my-scaleset"
