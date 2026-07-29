@@ -71,6 +71,10 @@ func sqlWorkflowJobToParamsJob(job WorkflowJob) (params.Job, error) {
 		jobParam.RunnerName = job.Instance.Name
 	}
 
+	if job.ScaleSetFkID != nil {
+		jobParam.ScaleSetID = *job.ScaleSetFkID
+	}
+
 	return jobParam, nil
 }
 
@@ -100,6 +104,11 @@ func (s *sqlDatabase) paramsJobToWorkflowJob(ctx context.Context, conn *gorm.DB,
 		EnterpriseID:    job.EnterpriseID,
 		Labels:          asJSON,
 		LockedBy:        job.LockedBy,
+	}
+
+	if job.ScaleSetID != 0 {
+		scaleSetID := job.ScaleSetID
+		workflofJob.ScaleSetFkID = &scaleSetID
 	}
 
 	if job.RunnerName != "" {
@@ -354,6 +363,11 @@ func (s *sqlDatabase) CreateOrUpdateJob(ctx context.Context, job params.Job) (pa
 
 			if job.EnterpriseID != nil {
 				workflowJob.EnterpriseID = job.EnterpriseID
+			}
+
+			if job.ScaleSetID != 0 {
+				scaleSetID := job.ScaleSetID
+				workflowJob.ScaleSetFkID = &scaleSetID
 			}
 			if err := tx.Save(&workflowJob).Error; err != nil {
 				return fmt.Errorf("error saving job: %w", err)

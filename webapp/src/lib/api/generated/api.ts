@@ -2039,6 +2039,12 @@ export interface Job {
      */
     'runner_name'?: string;
     /**
+     * ScaleSetID is the garm ID of the scale set this job was assigned to, if it came in through a scale set listener.
+     * @type {number}
+     * @memberof Job
+     */
+    'scale_set_id'?: number;
+    /**
      * ScaleSetJobID is the job ID when generated for a scale set.
      * @type {string}
      * @memberof Job
