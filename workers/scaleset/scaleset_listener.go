@@ -157,6 +157,18 @@ func (l *scaleSetListener) scaleSetIDLabel() string {
 	return strconv.FormatUint(uint64(l.scaleSetHelper.GetScaleSet().ID), 10)
 }
 
+// recordStatistics publishes the scale set statistics GitHub reports alongside
+// every message queue response. TotalAvailableJobs is the forge side queue
+// depth and, unlike anything GARM derives from job messages, it is not capped
+// by the capacity we advertise to the message queue.
+func (l *scaleSetListener) recordStatistics(stats *params.RunnerScaleSetStatistic) {
+	if stats == nil {
+		return
+	}
+	scaleSet := l.scaleSetHelper.GetScaleSet()
+	metrics.RecordScaleSetStatistics(scaleSet.Name, scaleSet.ProviderName, stats)
+}
+
 func (l *scaleSetListener) handleSessionMessage(msg params.RunnerScaleSetMessage) {
 	l.mux.Lock()
 	defer l.mux.Unlock()
@@ -171,6 +183,7 @@ func (l *scaleSetListener) handleSessionMessage(msg params.RunnerScaleSetMessage
 			slog.ErrorContext(l.ctx, "setting runner statistics", "error", err)
 		}
 	}
+	l.recordStatistics(msg.Statistics)
 
 	if params.ScaleSetMessageType(msg.MessageType) != params.MessageTypeRunnerScaleSetJobMessages {
 		slog.DebugContext(l.ctx, "message is not a job message, ignoring")
@@ -244,6 +257,15 @@ func (l *scaleSetListener) handleSessionMessage(msg params.RunnerScaleSetMessage
 	}
 
 	if len(startedJobs) > 0 {
+		// JobStarted carries the forge's own queue and runner assign
+		// timestamps, which is the only trustworthy source for queue latency.
+		// Our receive time is useless here: GitHub withholds job messages
+		// beyond the runner capacity we advertise when longpolling.
+		for _, job := range startedJobs {
+			metrics.ObserveJobForgeQueueDuration(
+				metrics.JobQueueSourceScaleSet, job.RequestLabels,
+				job.QueueTime, job.RunnerAssignTime)
+		}
 		if err := l.scaleSetHelper.HandleJobsStarted(startedJobs); err != nil {
 			slog.ErrorContext(l.ctx, "error handling started jobs", "error", err)
 			return
