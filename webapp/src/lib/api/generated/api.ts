@@ -2643,6 +2643,20 @@ export interface RunnerPrefix {
  * @export
  * @interface ScaleSet
  */
+/**
+ * RunnerScaleSetStatistic is the last runner scale set statistic received from GitHub on the message session.
+ * @export
+ * @interface RunnerScaleSetStatistic
+ */
+export interface RunnerScaleSetStatistic {
+    'totalAvailableJobs'?: number;
+    'totalAcquiredJobs'?: number;
+    'totalAssignedJobs'?: number;
+    'totalRunningJobs'?: number;
+    'totalRegisteredRunners'?: number;
+    'totalBusyRunners'?: number;
+    'totalIdleRunners'?: number;
+}
 export interface ScaleSet {
     /**
      * 
@@ -2788,6 +2802,12 @@ export interface ScaleSet {
      * @memberof ScaleSet
      */
     'provider_name'?: string;
+    /**
+     * Statistics is the last runner scale set statistic received from GitHub on the message session.
+     * @type {RunnerScaleSetStatistic}
+     * @memberof ScaleSet
+     */
+    'statistics'?: RunnerScaleSetStatistic;
     /**
      * 
      * @type {string}
