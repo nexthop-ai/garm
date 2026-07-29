@@ -63,7 +63,7 @@ scrape_configs:
 All metrics use the `garm_` namespace. Metrics fall into two groups:
 
 - **Snapshot metrics** are reset and recomputed on every tick (default every 60s, configured via `period` in `[metrics]`). These reflect the current state: pools, instances, entities, jobs.
-- **Cumulative metrics** are counters or gauges updated as GARM operates: webhooks received, provider operations, GitHub API calls, rate limits.
+- **Cumulative metrics** are counters or gauges updated as GARM operates: webhooks received, provider operations, GitHub API calls, rate limits, job queue latency, scale set statistics.
 
 #### Health
 
@@ -120,8 +120,17 @@ The `_info` gauges are always set to 1; the labels are what carry the informatio
 | `garm_scaleset_min_idle_runners` | Gauge | `id` |
 | `garm_scaleset_desired_runner_count` | Gauge | `id` |
 | `garm_scaleset_bootstrap_timeout` | Gauge | `id` |
+| `garm_scaleset_available_jobs` | Gauge | `id`, `scaleset_id`, `name` |
+| `garm_scaleset_acquired_jobs` | Gauge | `id`, `scaleset_id`, `name` |
+| `garm_scaleset_assigned_jobs` | Gauge | `id`, `scaleset_id`, `name` |
+| `garm_scaleset_running_jobs` | Gauge | `id`, `scaleset_id`, `name` |
+| `garm_scaleset_registered_runners` | Gauge | `id`, `scaleset_id`, `name` |
+| `garm_scaleset_busy_runners` | Gauge | `id`, `scaleset_id`, `name` |
+| `garm_scaleset_idle_runners` | Gauge | `id`, `scaleset_id`, `name` |
 
 The `id` label is GARM's internal scale set ID; `scaleset_id` is the numeric ID assigned by GitHub. `garm_scaleset_desired_runner_count` reflects the runner count GitHub has requested for the scale set (unique to scale sets, since GitHub drives scheduling).
+
+The last seven gauges are GitHub's own accounting, taken from the statistics GitHub attaches to every Actions message queue response, and are updated whenever the scale set listener receives a message (not on the snapshot tick). `garm_scaleset_available_jobs` is the metric to watch for queue depth: it is the number of jobs waiting on the forge side and, unlike anything derived from job messages, it is not capped by the runner capacity GARM advertises when it longpolls for messages. `garm_job_status{status="queued"}` only counts jobs GARM has been told about, so during saturation it understates the real backlog.
 
 #### Runner instances
 
@@ -150,6 +159,16 @@ The `operation` label on `garm_runner_operations_total` / `garm_runner_errors_to
 | Metric | Type | Labels |
 | -------- | ------ | -------- |
 | `garm_job_status` | Gauge | `job_id`, `workflow_job_id`, `scaleset_job_id`, `workflow_run_id`, `name`, `status`, `conclusion`, `runner_name`, `owner`, `repository`, `requested_labels` |
+| `garm_job_queue_duration_seconds` | Histogram | `runner_labels`, `source` |
+
+`garm_job_queue_duration_seconds` measures how long jobs waited between being queued on the forge and being started by a runner. It is observed once per job, when the job starts, and it is always computed from timestamps reported by the forge, never from GARM's local receive time. Scale set messages are delivered late by design, so local timestamps would badly understate the real wait.
+
+- `runner_labels` is the job's requested label set, sorted and comma joined so that permutations collapse into one series.
+- `source` is `scaleset` for jobs reported by the scale set listener (`runnerAssignTime - queueTime` from the Actions message queue) and `webhook` for jobs reported by a `workflow_job` webhook (`started_at - created_at`). The two are mutually exclusive: scale set jobs also emit webhooks, but those are skipped on the webhook path, so there is no double counting.
+- Buckets run from 15s to 4h, which covers waits long enough to matter during saturation.
+- Observations are dropped when the forge omits either timestamp, or when the computed duration would be negative.
+
+Coverage caveats: jobs that never start (cancelled while queued) are never observed, which is inherent to a start triggered measurement. Jobs on GitHub hosted runners (for example `ubuntu-latest`) are observed under `source="webhook"` whenever their org, repo or enterprise webhooks reach GARM, since GARM receives a `workflow_job` hook regardless of who picks the job up.
 
 #### GitHub/Gitea API
 
