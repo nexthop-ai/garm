@@ -239,10 +239,12 @@ A spike in `bootstrap_timeout` typically means a broken image, network or userda
 
 `garm_job_forge_queue_duration_seconds` differs from `garm_job_queue_duration_seconds` in its inputs and labels: it is computed from the forge's own timestamps and labeled by `runner_labels` and `source`, while `garm_job_queue_duration_seconds` is computed from GARM's stored job timestamps and labeled by `owner`.
 
-- `runner_labels` is the job's requested label set, sorted and comma joined so that permutations collapse into one series.
+- `runner_labels` is the job's requested label set, lowercased (GitHub matches runner labels case-insensitively) and sorted and comma joined, so that case and ordering variants collapse into one series.
 - `source` is `scaleset` for jobs reported by the scale set listener (`runnerAssignTime - queueTime` from the Actions message queue) and `webhook` for jobs reported by a `workflow_job` webhook (`started_at - created_at`). The two are mutually exclusive: scale set jobs also emit webhooks, but those are skipped on the webhook path, so there is no double counting.
 - Buckets run from 15s to 4h, which covers waits long enough to matter during saturation.
 - Observations are dropped when the forge omits either timestamp, or when the computed duration would be negative.
+
+Cardinality warning: `runner_labels` is derived from the workflow's `runs-on`, which workflow authors control. Every novel label set mints a new series, so keep `runs-on` values to a bounded, agreed set and never put per-job or per-run values there.
 
 Coverage caveats: jobs that never start (cancelled while queued) are never observed, which is inherent to a start triggered measurement. Jobs on GitHub hosted runners (for example `ubuntu-latest`) are observed under `source="webhook"` whenever their org, repo or enterprise webhooks reach GARM, since GARM receives a `workflow_job` hook regardless of who picks the job up.
 
