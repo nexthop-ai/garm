@@ -85,6 +85,17 @@ func TestNormalizeRunnerLabels(t *testing.T) {
 			labels:   []string{" self-hosted ", "linux"},
 			expected: "linux,self-hosted",
 		},
+		{
+			// GitHub matches runner labels case-insensitively.
+			name:     "labels are lowercased",
+			labels:   []string{"Linux", "Self-Hosted", "X64"},
+			expected: "linux,self-hosted,x64",
+		},
+		{
+			name:     "case variants of one label collapse",
+			labels:   []string{"linux", "Linux", "LINUX"},
+			expected: "linux",
+		},
 	}
 
 	for _, tt := range tests {

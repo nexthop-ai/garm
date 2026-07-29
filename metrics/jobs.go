@@ -68,6 +68,10 @@ var JobCount = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 // messages are delivered late by design and GitHub withholds job messages
 // beyond the advertised runner capacity, so local receive time would badly
 // understate the real wait.
+//
+// Cardinality: runner_labels comes from the workflow's runs-on, which workflow
+// authors control, so every novel label set mints a new series. Keep runs-on
+// values to a bounded, agreed set; do not put per-job or per-run values there.
 var JobQueueDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 	Namespace: metricsNamespace,
 	Subsystem: metricsJobsSubsystem,
@@ -99,15 +103,17 @@ func ObserveJobQueueDuration(source string, runnerLabels []string, queueTime, st
 }
 
 // NormalizeRunnerLabels renders a job's requested labels as a single, stable
-// label value. The labels are sorted so that permutations of the same label
-// set collapse into one time series, keeping cardinality bounded.
+// label value, keeping cardinality bounded. The labels are lowercased, since
+// GitHub matches runner labels case-insensitively and "Linux" must not split a
+// series from "linux", and sorted so that permutations of the same label set
+// collapse into one time series.
 func NormalizeRunnerLabels(runnerLabels []string) string {
 	if len(runnerLabels) == 0 {
 		return ""
 	}
 	sorted := make([]string, 0, len(runnerLabels))
 	for _, lbl := range runnerLabels {
-		if lbl = strings.TrimSpace(lbl); lbl != "" {
+		if lbl = strings.ToLower(strings.TrimSpace(lbl)); lbl != "" {
 			sorted = append(sorted, lbl)
 		}
 	}
