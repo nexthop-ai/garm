@@ -235,6 +235,30 @@ func (r *basePoolManager) shouldRecordJob(ctx context.Context, jobParams params.
 	return false
 }
 
+// jobQueueDurationObserved reports whether we already observed a queue duration
+// for this job. Webhook delivery is at-least-once and persistJobToDB only
+// rejects backward transitions, so a redelivered in_progress hook would
+// otherwise be counted twice in the histogram.
+//
+// This can only dedup jobs we persist. Jobs shouldRecordJob rejects (notably
+// GitHub hosted runners, whose labels match no pool of ours) never reach the
+// database, so a redelivery of one of those is still double counted. That is
+// the accepted trade-off for measuring them at all.
+func (r *basePoolManager) jobQueueDurationObserved(ctx context.Context, workflowJobID int64) bool {
+	existingJob, err := r.store.GetJobByID(ctx, workflowJobID)
+	if err != nil {
+		// Not found means this is the first hook we record for the job. Any
+		// other error leaves us guessing; observing is the lesser evil.
+		if !errors.Is(err, runnerErrors.ErrNotFound) {
+			slog.With(slog.Any("error", err)).ErrorContext(
+				ctx, "failed to look up job for queue duration dedup",
+				"job_id", workflowJobID)
+		}
+		return false
+	}
+	return existingJob.Action == jobActionInProgress || existingJob.Action == jobActionCompleted
+}
+
 // persistJobToDB validates the job state transition and saves or updates the job
 // in the database. Returns an error if the transition is invalid.
 func (r *basePoolManager) persistJobToDB(ctx context.Context, jobParams params.Job) error {
@@ -460,7 +484,11 @@ func (r *basePoolManager) HandleWorkflowJob(job params.WorkflowJob) error {
 	// timestamps; webhooks can be delayed and our clock is not authoritative.
 	// Scale set jobs never get here (they returned above) and are accounted for
 	// by the scale set listener instead, so there is no double counting.
-	if job.Action == jobActionInProgress {
+	//
+	// This must stay ahead of persistJobToDB: shouldRecordJob rejects jobs that
+	// no pool of ours can serve (GitHub hosted runners, other pool managers'
+	// jobs), and those waits are still worth measuring.
+	if job.Action == jobActionInProgress && !r.jobQueueDurationObserved(ctx, jobParams.WorkflowJobID) {
 		metrics.ObserveJobQueueDuration(
 			metrics.JobQueueSourceWebhook, job.WorkflowJob.Labels,
 			job.WorkflowJob.CreatedAt, job.WorkflowJob.StartedAt)

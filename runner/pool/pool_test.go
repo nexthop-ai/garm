@@ -848,6 +848,43 @@ func (s *PoolStressTestSuite) TestHandleWorkflowJobObservesQueueDuration() {
 	s.Equal(uint64(1), count, "completed webhooks must not be observed")
 }
 
+// TestHandleWorkflowJobDeduplicatesQueueDuration verifies that a redelivered
+// in_progress webhook is observed only once. Webhook delivery is at-least-once
+// and persistJobToDB only rejects backward transitions, so in_progress ->
+// in_progress passes validation and would otherwise be counted twice.
+func (s *PoolStressTestSuite) TestHandleWorkflowJobDeduplicatesQueueDuration() {
+	metrics.JobQueueDuration.Reset()
+	s.setupProviderMocks()
+
+	labels := []string{"self-hosted", "linux", "x64"}
+	createdAt := time.Date(2026, 7, 29, 10, 0, 0, 0, time.UTC)
+
+	queuedJob := s.makeWorkflowJob(2104, "queued", "queued", "", labels)
+	queuedJob.WorkflowJob.CreatedAt = createdAt
+	s.Require().NoError(s.mgr.HandleWorkflowJob(queuedJob))
+
+	s.syncJobsFromDB()
+	s.Require().NoError(s.mgr.consumeQueuedJobs())
+
+	instances, err := s.store.ListPoolInstances(s.adminCtx, s.pool.ID, false)
+	s.Require().NoError(err)
+	s.Require().NotEmpty(instances)
+	runnerName := instances[0].Name
+
+	inProgressJob := s.makeWorkflowJob(2104, "in_progress", "in_progress", runnerName, labels)
+	inProgressJob.WorkflowJob.CreatedAt = createdAt
+	inProgressJob.WorkflowJob.StartedAt = createdAt.Add(3 * time.Minute)
+
+	// Deliver the same hook three times, as GitHub is entitled to.
+	for i := 0; i < 3; i++ {
+		s.Require().NoError(s.mgr.HandleWorkflowJob(inProgressJob))
+	}
+
+	count, sum := s.jobQueueDurationSamples(labels)
+	s.Equal(uint64(1), count, "redelivered in_progress webhooks must be observed once")
+	s.InDelta(180.0, sum, 0.001)
+}
+
 // TestHandleWorkflowJobSkipsQueueDurationWithoutCreatedAt makes sure we never
 // substitute a local timestamp when the forge omits created_at.
 func (s *PoolStressTestSuite) TestHandleWorkflowJobSkipsQueueDurationWithoutCreatedAt() {
