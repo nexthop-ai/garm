@@ -70,6 +70,11 @@ const (
 	// nolint:golangci-lint,godox
 	// TODO: make this configurable(?)
 	maxCreateAttempts = 5
+
+	// Actions sent by the forge on workflow_job webhooks.
+	jobActionQueued     = "queued"
+	jobActionInProgress = "in_progress"
+	jobActionCompleted  = "completed"
 )
 
 func NewEntityPoolManager(ctx context.Context, entity params.ForgeEntity, instanceTokenGetter auth.InstanceTokenGetter, providers map[string]common.Provider, store dbCommon.Store) (common.PoolManager, error) {
@@ -479,7 +484,7 @@ func (r *basePoolManager) HandleWorkflowJob(job params.WorkflowJob) error {
 	// job. A scale set runner means the job is handled by the scale set
 	// listener, not by webhooks. A pool runner attributes the job to its
 	// pool, which is the first moment we know which pool serviced it.
-	if job.Action == "in_progress" || job.Action == "completed" {
+	if job.Action == jobActionInProgress || job.Action == jobActionCompleted {
 		if jobParams.RunnerName != "" {
 			instance, err := r.store.GetInstance(ctx, jobParams.RunnerName)
 			if err == nil && instance.ScaleSetID != 0 {
@@ -508,6 +513,16 @@ func (r *basePoolManager) HandleWorkflowJob(job params.WorkflowJob) error {
 		}
 	}
 
+	// The job reached a runner. Record the queue latency using the forge's own
+	// timestamps; webhooks can be delayed and our clock is not authoritative.
+	// Scale set jobs never get here (they returned above) and are accounted for
+	// by the scale set listener instead, so there is no double counting.
+	if job.Action == jobActionInProgress {
+		metrics.ObserveJobForgeQueueDuration(
+			metrics.JobQueueSourceWebhook, job.WorkflowJob.Labels,
+			job.WorkflowJob.CreatedAt, job.WorkflowJob.StartedAt)
+	}
+
 	// Validate and persist job to database first, then act on it.
 	if err := r.persistJobToDB(ctx, jobParams); err != nil {
 		return err
@@ -517,14 +532,14 @@ func (r *basePoolManager) HandleWorkflowJob(job params.WorkflowJob) error {
 	var actionErr error
 
 	switch job.Action {
-	case "queued":
+	case jobActionQueued:
 		// Queued jobs are recorded and consumed by consumeQueuedJobs() on
 		// its next tick. With no job age backoff there is nothing to wait
 		// for, so wake the consumer now.
 		if r.controllerInfo.JobBackoff() == 0 {
 			wakeLoop(r.consumeJobsCh)
 		}
-	case "in_progress":
+	case jobActionInProgress:
 		triggeredBy, inProgressErr := r.handleInProgressJob(ctx, jobParams)
 		actionErr = inProgressErr
 		// Break lock on the queued job that originally triggered this runner.
@@ -535,7 +550,7 @@ func (r *basePoolManager) HandleWorkflowJob(job params.WorkflowJob) error {
 					"job_id", triggeredBy)
 			}
 		}
-	case "completed":
+	case jobActionCompleted:
 		actionErr = r.handleCompletedJob(ctx, jobParams)
 	}
 
