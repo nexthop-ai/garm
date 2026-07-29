@@ -56,53 +56,55 @@ var (
 
 	// The gauges below mirror the statistics GitHub attaches to every message
 	// queue response. Unlike ScaleSetJobCount, which only knows about jobs GARM
-	// has been told about, these are GitHub's own view of the scale set.
-	ScaleSetAvailableJobs = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	// has been told about, these are GitHub's own view of the scale set. They
+	// carry a gh_ prefix so nobody mistakes them for GARM's own counts, which
+	// can and do disagree with GitHub.
+	ScaleSetGHAvailableJobs = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: metricsNamespace,
 		Subsystem: metricsScaleSetSubsystem,
-		Name:      "available_jobs",
+		Name:      "gh_available_jobs",
 		Help:      "Jobs queued on the forge and available to the scale set, as reported by GitHub",
 	}, scaleSetStatsLabels)
 
-	ScaleSetAcquiredJobs = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	ScaleSetGHAcquiredJobs = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: metricsNamespace,
 		Subsystem: metricsScaleSetSubsystem,
-		Name:      "acquired_jobs",
+		Name:      "gh_acquired_jobs",
 		Help:      "Jobs acquired from the scale set queue, as reported by GitHub",
 	}, scaleSetStatsLabels)
 
-	ScaleSetAssignedJobs = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	ScaleSetGHAssignedJobs = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: metricsNamespace,
 		Subsystem: metricsScaleSetSubsystem,
-		Name:      "assigned_jobs",
+		Name:      "gh_assigned_jobs",
 		Help:      "Jobs assigned to the scale set, as reported by GitHub",
 	}, scaleSetStatsLabels)
 
-	ScaleSetRunningJobs = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	ScaleSetGHRunningJobs = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: metricsNamespace,
 		Subsystem: metricsScaleSetSubsystem,
-		Name:      "running_jobs",
+		Name:      "gh_running_jobs",
 		Help:      "Jobs currently running on the scale set, as reported by GitHub",
 	}, scaleSetStatsLabels)
 
-	ScaleSetRegisteredRunners = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	ScaleSetGHRegisteredRunners = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: metricsNamespace,
 		Subsystem: metricsScaleSetSubsystem,
-		Name:      "registered_runners",
+		Name:      "gh_registered_runners",
 		Help:      "Runners registered with the scale set, as reported by GitHub",
 	}, scaleSetStatsLabels)
 
-	ScaleSetBusyRunners = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	ScaleSetGHBusyRunners = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: metricsNamespace,
 		Subsystem: metricsScaleSetSubsystem,
-		Name:      "busy_runners",
+		Name:      "gh_busy_runners",
 		Help:      "Registered runners currently executing a job, as reported by GitHub",
 	}, scaleSetStatsLabels)
 
-	ScaleSetIdleRunners = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	ScaleSetGHIdleRunners = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: metricsNamespace,
 		Subsystem: metricsScaleSetSubsystem,
-		Name:      "idle_runners",
+		Name:      "gh_idle_runners",
 		Help:      "Registered runners currently idle, as reported by GitHub",
 	}, scaleSetStatsLabels)
 )
@@ -117,13 +119,13 @@ func RecordScaleSetStatistics(scaleSetName, provider string, stats *params.Runne
 		return
 	}
 	for gauge, value := range map[*prometheus.GaugeVec]int{
-		ScaleSetAvailableJobs:     stats.TotalAvailableJobs,
-		ScaleSetAcquiredJobs:      stats.TotalAcquiredJobs,
-		ScaleSetAssignedJobs:      stats.TotalAssignedJobs,
-		ScaleSetRunningJobs:       stats.TotalRunningJobs,
-		ScaleSetRegisteredRunners: stats.TotalRegisteredRunners,
-		ScaleSetBusyRunners:       stats.TotalBusyRunners,
-		ScaleSetIdleRunners:       stats.TotalIdleRunners,
+		ScaleSetGHAvailableJobs:     stats.TotalAvailableJobs,
+		ScaleSetGHAcquiredJobs:      stats.TotalAcquiredJobs,
+		ScaleSetGHAssignedJobs:      stats.TotalAssignedJobs,
+		ScaleSetGHRunningJobs:       stats.TotalRunningJobs,
+		ScaleSetGHRegisteredRunners: stats.TotalRegisteredRunners,
+		ScaleSetGHBusyRunners:       stats.TotalBusyRunners,
+		ScaleSetGHIdleRunners:       stats.TotalIdleRunners,
 	} {
 		gauge.WithLabelValues(scaleSetName, provider).Set(float64(value))
 	}
