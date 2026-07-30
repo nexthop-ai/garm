@@ -34,16 +34,10 @@ func scaleSetStatsGauges() map[string]*prometheus.GaugeVec {
 	}
 }
 
-func resetScaleSetStats() {
-	for _, gauge := range scaleSetStatsGauges() {
-		gauge.Reset()
-	}
-}
+func TestRecordScaleSetGHStatistics(t *testing.T) {
+	ResetScaleSetGHStatistics()
 
-func TestRecordScaleSetStatistics(t *testing.T) {
-	resetScaleSetStats()
-
-	RecordScaleSetStatistics("my-scaleset", "test-provider", &params.RunnerScaleSetStatistic{
+	RecordScaleSetGHStatistics("my-scaleset", "test-provider", &params.RunnerScaleSetStatistic{
 		TotalAvailableJobs:     101,
 		TotalAcquiredJobs:      7,
 		TotalAssignedJobs:      5,
@@ -76,14 +70,35 @@ func TestRecordScaleSetStatistics(t *testing.T) {
 	}
 }
 
-func TestRecordScaleSetStatisticsNilIsNoop(t *testing.T) {
-	resetScaleSetStats()
+func TestRecordScaleSetGHStatisticsNilIsNoop(t *testing.T) {
+	ResetScaleSetGHStatistics()
 
-	RecordScaleSetStatistics("my-scaleset", "test-provider", nil)
+	RecordScaleSetGHStatistics("my-scaleset", "test-provider", nil)
 
 	for name, gauge := range scaleSetStatsGauges() {
 		if series := collect(t, gauge); len(series) != 0 {
 			t.Errorf("%s: expected no series, got %v", name, series)
+		}
+	}
+}
+
+// A scale set that goes away must stop reporting rather than pinning its last
+// value forever, which is why the collector resets before each pass.
+func TestResetScaleSetGHStatisticsClearsSeries(t *testing.T) {
+	ResetScaleSetGHStatistics()
+
+	RecordScaleSetGHStatistics("doomed-scaleset", "test-provider", &params.RunnerScaleSetStatistic{
+		TotalAvailableJobs: 42,
+	})
+	if series := collect(t, ScaleSetGHAvailableJobs); len(series) == 0 {
+		t.Fatal("expected a series before reset")
+	}
+
+	ResetScaleSetGHStatistics()
+
+	for name, gauge := range scaleSetStatsGauges() {
+		if series := collect(t, gauge); len(series) != 0 {
+			t.Errorf("%s: expected no series after reset, got %v", name, series)
 		}
 	}
 }

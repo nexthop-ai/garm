@@ -20,46 +20,34 @@ import (
 	"context"
 	"testing"
 
-	"github.com/prometheus/client_golang/prometheus"
-	dto "github.com/prometheus/client_model/go"
-
-	"github.com/cloudbase/garm/metrics"
 	"github.com/cloudbase/garm/params"
 	"github.com/cloudbase/garm/util/github/scalesets"
 )
 
-// stubScaleSetHelper implements just enough of scaleSetHelper to exercise the
-// metrics recording helpers.
+// stubScaleSetHelper implements just enough of scaleSetHelper to exercise
+// statistics handling, and records what was persisted.
 type stubScaleSetHelper struct {
 	scaleSet params.ScaleSet
+
+	statistics []params.RunnerScaleSetStatistic
 }
 
 func (s *stubScaleSetHelper) GetScaleSet() params.ScaleSet { return s.scaleSet }
 func (s *stubScaleSetHelper) GetScaleSetClient() (*scalesets.ScaleSetClient, error) {
 	return nil, nil
 }
-func (s *stubScaleSetHelper) SetLastMessageID(_ int64) error                          { return nil }
-func (s *stubScaleSetHelper) SetDesiredRunnerCount(_ int) error                       { return nil }
+func (s *stubScaleSetHelper) SetLastMessageID(_ int64) error    { return nil }
+func (s *stubScaleSetHelper) SetDesiredRunnerCount(_ int) error { return nil }
+func (s *stubScaleSetHelper) SetRunnerStatistics(stats params.RunnerScaleSetStatistic) error {
+	s.statistics = append(s.statistics, stats)
+	return nil
+}
 func (s *stubScaleSetHelper) Owner() string                                           { return "test-owner" }
 func (s *stubScaleSetHelper) HandleJobsCompleted(_ []params.ScaleSetJobMessage) error { return nil }
 func (s *stubScaleSetHelper) HandleJobsStarted(_ []params.ScaleSetJobMessage) error   { return nil }
 func (s *stubScaleSetHelper) HandleJobsAvailable(_ []params.ScaleSetJobMessage) error { return nil }
 
-func gaugeValue(t *testing.T, gauge *prometheus.GaugeVec, labels ...string) float64 {
-	t.Helper()
-
-	m, err := gauge.GetMetricWithLabelValues(labels...)
-	if err != nil {
-		t.Fatalf("getting gauge: %v", err)
-	}
-	var pb dto.Metric
-	if err := m.Write(&pb); err != nil {
-		t.Fatalf("writing gauge: %v", err)
-	}
-	return pb.GetGauge().GetValue()
-}
-
-func newTestListener() *scaleSetListener {
+func newTestListener() (*scaleSetListener, *stubScaleSetHelper) {
 	helper := &stubScaleSetHelper{
 		scaleSet: params.ScaleSet{
 			ID:           7,
@@ -68,64 +56,50 @@ func newTestListener() *scaleSetListener {
 			ProviderName: "test-provider",
 		},
 	}
-	l := newListener(context.Background(), helper)
-	return l
+	return newListener(context.Background(), helper), helper
 }
 
-func TestRecordStatistics(t *testing.T) {
-	metrics.ScaleSetGHAvailableJobs.Reset()
-	metrics.ScaleSetGHAssignedJobs.Reset()
-	metrics.ScaleSetGHIdleRunners.Reset()
+// The garm_scaleset_gh_* gauges are collected from the statistics stored on the
+// scale set, so statistics must be persisted even for messages we otherwise
+// drop on the floor. Otherwise the gauges go stale for as long as the scale set
+// sees nothing but messages of a type we do not act on.
+func TestHandleSessionMessagePersistsStatisticsForNonJobMessages(t *testing.T) {
+	l, helper := newTestListener()
 
-	l := newTestListener()
-	l.recordStatistics(&params.RunnerScaleSetStatistic{
-		TotalAvailableJobs: 250,
-		TotalAssignedJobs:  10,
-		TotalIdleRunners:   3,
-	})
-
-	lbls := []string{"test-scaleset", "test-provider"}
-
-	if got := gaugeValue(t, metrics.ScaleSetGHAvailableJobs, lbls...); got != 250 {
-		t.Errorf("available_jobs = %v, want 250", got)
-	}
-	if got := gaugeValue(t, metrics.ScaleSetGHAssignedJobs, lbls...); got != 10 {
-		t.Errorf("assigned_jobs = %v, want 10", got)
-	}
-	if got := gaugeValue(t, metrics.ScaleSetGHIdleRunners, lbls...); got != 3 {
-		t.Errorf("idle_runners = %v, want 3", got)
-	}
-}
-
-func TestRecordStatisticsNilIsNoop(t *testing.T) {
-	metrics.ScaleSetGHAvailableJobs.Reset()
-
-	l := newTestListener()
-	l.recordStatistics(nil)
-
-	ch := make(chan prometheus.Metric, 8)
-	metrics.ScaleSetGHAvailableJobs.Collect(ch)
-	close(ch)
-	if len(ch) != 0 {
-		t.Errorf("expected no series, got %d", len(ch))
-	}
-}
-
-// TestHandleSessionMessageIgnoresNonJobMessagesButKeepsStatistics documents
-// that statistics ride along on every message, even ones we otherwise drop.
-func TestHandleSessionMessageIgnoresNonJobMessagesButKeepsStatistics(t *testing.T) {
-	metrics.ScaleSetGHAvailableJobs.Reset()
-
-	l := newTestListener()
 	l.handleSessionMessage(params.RunnerScaleSetMessage{
 		MessageID:   1,
 		MessageType: "SomeOtherMessageType",
 		Statistics: &params.RunnerScaleSetStatistic{
 			TotalAvailableJobs: 99,
+			TotalAssignedJobs:  10,
+			TotalIdleRunners:   3,
 		},
 	})
 
-	if got := gaugeValue(t, metrics.ScaleSetGHAvailableJobs, "test-scaleset", "test-provider"); got != 99 {
-		t.Errorf("available_jobs = %v, want 99", got)
+	if len(helper.statistics) != 1 {
+		t.Fatalf("expected statistics to be persisted once, got %d", len(helper.statistics))
+	}
+	got := helper.statistics[0]
+	if got.TotalAvailableJobs != 99 {
+		t.Errorf("TotalAvailableJobs = %d, want 99", got.TotalAvailableJobs)
+	}
+	if got.TotalAssignedJobs != 10 {
+		t.Errorf("TotalAssignedJobs = %d, want 10", got.TotalAssignedJobs)
+	}
+	if got.TotalIdleRunners != 3 {
+		t.Errorf("TotalIdleRunners = %d, want 3", got.TotalIdleRunners)
+	}
+}
+
+func TestHandleSessionMessageNilStatisticsIsNoop(t *testing.T) {
+	l, helper := newTestListener()
+
+	l.handleSessionMessage(params.RunnerScaleSetMessage{
+		MessageID:   1,
+		MessageType: "SomeOtherMessageType",
+	})
+
+	if len(helper.statistics) != 0 {
+		t.Errorf("expected no statistics to be persisted, got %v", helper.statistics)
 	}
 }

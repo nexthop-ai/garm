@@ -109,12 +109,39 @@ var (
 	}, scaleSetStatsLabels)
 )
 
-// RecordScaleSetStatistics publishes the statistics GitHub reports for a scale
-// set. TotalAvailableJobs is the real forge side queue depth: it is not gated
-// by the capacity GARM advertises when longpolling for messages, which is what
-// makes garm_job_count{status="queued"} and garm_scaleset_job_count underreport
-// the backlog during saturation.
-func RecordScaleSetStatistics(scaleSetName, provider string, stats *params.RunnerScaleSetStatistic) {
+// scaleSetGHStatGauges is the set of gauges fed from RunnerScaleSetStatistic,
+// used to reset them all together on each collection pass.
+var scaleSetGHStatGauges = []*prometheus.GaugeVec{
+	ScaleSetGHAvailableJobs,
+	ScaleSetGHAcquiredJobs,
+	ScaleSetGHAssignedJobs,
+	ScaleSetGHRunningJobs,
+	ScaleSetGHRegisteredRunners,
+	ScaleSetGHBusyRunners,
+	ScaleSetGHIdleRunners,
+}
+
+// ResetScaleSetGHStatistics clears the GitHub reported scale set gauges. The
+// collector calls this before repopulating them so that scale sets which have
+// been deleted stop reporting instead of holding their last value forever.
+func ResetScaleSetGHStatistics() {
+	for _, gauge := range scaleSetGHStatGauges {
+		gauge.Reset()
+	}
+}
+
+// RecordScaleSetGHStatistics publishes the statistics GitHub reports for a
+// scale set. TotalAvailableJobs is the real forge side queue depth: it is not
+// gated by the capacity GARM advertises when longpolling for messages, which is
+// what makes garm_job_count{status="queued"} and garm_scaleset_job_count
+// underreport the backlog during saturation.
+//
+// The statistics are read off the scale set, where the listener stores whatever
+// GitHub last reported. A nil stats pointer means the listener has not seen a
+// message queue response yet and is recorded as nothing at all, rather than as
+// a set of zeroes that would be indistinguishable from a genuinely idle scale
+// set.
+func RecordScaleSetGHStatistics(scaleSetName, provider string, stats *params.RunnerScaleSetStatistic) {
 	if stats == nil {
 		return
 	}
