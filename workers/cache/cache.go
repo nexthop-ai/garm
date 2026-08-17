@@ -22,6 +22,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	commonParams "github.com/cloudbase/garm-provider-common/params"
 	"github.com/cloudbase/garm/cache"
 	"github.com/cloudbase/garm/database/common"
 	"github.com/cloudbase/garm/database/watcher"
@@ -430,6 +431,14 @@ func (w *Worker) handleInstanceEvent(event common.ChangePayload) {
 	}
 	switch event.Operation {
 	case common.CreateOperation, common.UpdateOperation:
+		// InstanceDeleted is a terminal status set right before the DB row is
+		// removed. Treat it as an eviction: if the subsequent delete event is
+		// ever missed or observed before this update, an upsert here would
+		// re-insert a tombstone that nothing evicts afterwards.
+		if instance.Status == commonParams.InstanceDeleted {
+			cache.DeleteInstanceCache(instance.Name)
+			return
+		}
 		cache.SetInstanceCache(instance)
 	case common.DeleteOperation:
 		cache.DeleteInstanceCache(instance.Name)
