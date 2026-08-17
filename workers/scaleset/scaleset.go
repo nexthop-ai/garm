@@ -205,6 +205,7 @@ func (w *Worker) Start() (err error) {
 	}
 
 	for _, instance := range instances {
+		instanceName := instance.Name
 		switch instance.Status {
 		case commonParams.InstanceCreating:
 			// We're just starting up. We found an instance stuck in creating.
@@ -274,12 +275,15 @@ func (w *Worker) Start() (err error) {
 			runnerUpdateParams := params.UpdateInstanceParams{
 				Status: instanceState,
 			}
-			instance, err = w.store.ForceUpdateInstance(w.ctx, instance.Name, runnerUpdateParams)
+			instance, err = w.store.ForceUpdateInstance(w.ctx, instanceName, runnerUpdateParams)
 			if err != nil {
-				if !errors.Is(err, runnerErrors.ErrNotFound) {
-					locking.Unlock(instance.Name, false)
-					return fmt.Errorf("updating runner %s: %w", instance.Name, err)
+				locking.Unlock(instanceName, false)
+				if errors.Is(err, runnerErrors.ErrNotFound) {
+					// The DB record vanished from under us. The runner is gone;
+					// don't track a zero-value instance for it.
+					continue
 				}
+				return fmt.Errorf("updating runner %s: %w", instanceName, err)
 			}
 		case commonParams.InstanceDeleting:
 			// Set the instance in deleting. It is assumed that the runner was already
@@ -291,12 +295,15 @@ func (w *Worker) Start() (err error) {
 			runnerUpdateParams := params.UpdateInstanceParams{
 				Status: commonParams.InstancePendingDelete,
 			}
-			instance, err = w.store.ForceUpdateInstance(w.ctx, instance.Name, runnerUpdateParams)
+			instance, err = w.store.ForceUpdateInstance(w.ctx, instanceName, runnerUpdateParams)
 			if err != nil {
-				if !errors.Is(err, runnerErrors.ErrNotFound) {
-					locking.Unlock(instance.Name, false)
-					return fmt.Errorf("updating runner %s: %w", instance.Name, err)
+				locking.Unlock(instanceName, false)
+				if errors.Is(err, runnerErrors.ErrNotFound) {
+					// The DB record vanished from under us. The runner is gone;
+					// don't track a zero-value instance for it.
+					continue
 				}
+				return fmt.Errorf("updating runner %s: %w", instanceName, err)
 			}
 		case commonParams.InstanceDeleted:
 			if err := w.handleInstanceCleanup(instance); err != nil {
@@ -306,7 +313,7 @@ func (w *Worker) Start() (err error) {
 			continue
 		}
 		w.runners[instance.ID] = instance
-		locking.Unlock(instance.Name, false)
+		locking.Unlock(instanceName, false)
 	}
 
 	if err := w.ensureScaleSetInGitHub(); err != nil {
@@ -361,11 +368,39 @@ func (w *Worker) setRunnerDBStatus(runner string, status commonParams.InstanceSt
 	}
 	newDbInstance, err := w.store.UpdateInstance(w.ctx, runner, updateParams)
 	if err != nil {
-		if !errors.Is(err, runnerErrors.ErrNotFound) {
-			return params.Instance{}, fmt.Errorf("updating runner %s: %w", runner, err)
-		}
+		return params.Instance{}, fmt.Errorf("updating runner %s: %w", runner, err)
 	}
 	return newDbInstance, nil
+}
+
+// deleteRunnerEntryByName evicts any worker-local runner entries with the
+// given name.
+func (w *Worker) deleteRunnerEntryByName(name string) {
+	for id, runner := range w.runners {
+		if runner.Name == name {
+			delete(w.runners, id)
+		}
+	}
+}
+
+// markRunnerPendingDelete transitions the runner's DB record to pending_delete
+// and mirrors the result in the worker-local runner map. If the DB record is
+// already gone, the runner is finished: any stale local entry is evicted.
+// Storing the zero-value instance returned in that case (as was done
+// previously) created entries with an empty status that no cleanup path ever
+// removed, each permanently occupying a max_runners slot and starving
+// scale-up.
+func (w *Worker) markRunnerPendingDelete(runnerName string) error {
+	instance, err := w.setRunnerDBStatus(runnerName, commonParams.InstancePendingDelete)
+	if err != nil {
+		if errors.Is(err, runnerErrors.ErrNotFound) {
+			w.deleteRunnerEntryByName(runnerName)
+			return nil
+		}
+		return err
+	}
+	w.runners[instance.ID] = instance
+	return nil
 }
 
 func (w *Worker) removeRunnerFromGithubAndSetPendingDelete(runnerName string, agentID int64) error {
@@ -384,12 +419,7 @@ func (w *Worker) removeRunnerFromGithubAndSetPendingDelete(runnerName string, ag
 			slog.WarnContext(w.ctx, "github refused to remove runner; deleting instance anyway", "runner_name", runnerName, "error", err)
 		}
 	}
-	instance, err := w.setRunnerDBStatus(runnerName, commonParams.InstancePendingDelete)
-	if err != nil {
-		return fmt.Errorf("updating runner %s: %w", instance.Name, err)
-	}
-	w.runners[instance.ID] = instance
-	return nil
+	return w.markRunnerPendingDelete(runnerName)
 }
 
 // offlineTimeoutJitter returns a deterministic per-runner offset in
@@ -627,17 +657,13 @@ func (w *Worker) consolidateRunnerState(runners []params.RunnerReference) error 
 			defer locking.Unlock(name, false)
 
 			slog.InfoContext(w.ctx, "runner does not exist in github; removing from provider", "runner_name", name)
-			instance, err := w.setRunnerDBStatus(runner.Name, commonParams.InstancePendingDelete)
-			if err != nil {
-				if !errors.Is(err, runnerErrors.ErrNotFound) {
-					return fmt.Errorf("updating runner %s: %w", instance.Name, err)
-				}
-			}
 			// We will get an update event anyway from the watcher, but updating the runner
 			// here, will prevent race conditions if some other event is already in the queue
 			// which involves this runner. For the duration of the lifetime of this function, we
 			// hold the lock, so no race condition can occur.
-			w.runners[runner.ID] = instance
+			if err := w.markRunnerPendingDelete(runner.Name); err != nil {
+				return fmt.Errorf("updating runner %s: %w", runner.Name, err)
+			}
 		}
 	}
 
