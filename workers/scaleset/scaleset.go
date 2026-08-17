@@ -547,9 +547,47 @@ func (w *Worker) reapTimedOutRunners(runners map[string]params.RunnerReference) 
 	return unlockFn, nil
 }
 
+// syncRunnersFromDB replaces the worker-local runner map with the current
+// database state. The map is otherwise maintained from watcher events; a
+// missed or reordered event would leave a stale entry that inflates
+// runnerCount() and starves scale-up (the autoscaler compares it against the
+// target). The DB is the source of truth and this read is at least as fresh
+// as any event processed so far, so a wholesale replace under the worker
+// mutex is safe. Must be called with w.mux held.
+func (w *Worker) syncRunnersFromDB() error {
+	dbInstances, err := w.store.ListScaleSetInstances(w.ctx, w.scaleSet.ID, false)
+	if err != nil {
+		return fmt.Errorf("listing scale set instances: %w", err)
+	}
+
+	fresh := make(map[string]params.Instance, len(dbInstances))
+	names := make(map[string]struct{}, len(dbInstances))
+	for _, instance := range dbInstances {
+		fresh[instance.ID] = instance
+		names[instance.Name] = struct{}{}
+	}
+	if len(w.runners) != len(fresh) {
+		slog.WarnContext(w.ctx, "worker runner state diverged from database; resyncing",
+			"tracked_runners", len(w.runners), "db_runners", len(fresh))
+	}
+	w.runners = fresh
+
+	// Drop offline tracking for runners that no longer exist.
+	for name := range w.offlineSince {
+		if _, ok := names[name]; !ok {
+			delete(w.offlineSince, name)
+		}
+	}
+	return nil
+}
+
 func (w *Worker) consolidateRunnerState(runners []params.RunnerReference) error {
 	w.mux.Lock()
 	defer w.mux.Unlock()
+
+	if err := w.syncRunnersFromDB(); err != nil {
+		return fmt.Errorf("syncing runners from the database: %w", err)
+	}
 
 	ghRunnersByName := make(map[string]params.RunnerReference)
 	for _, runner := range runners {

@@ -162,6 +162,65 @@ func (w *Worker) loadAllEntities() error {
 	return nil
 }
 
+// instanceCacheReconcileInterval is how often the instance cache is
+// reconciled against the database.
+const instanceCacheReconcileInterval = 5 * time.Minute
+
+// reconcileInstanceCache reconciles the instance cache against the database.
+// The cache is otherwise maintained purely from watcher events; any missed
+// event (worker restarts, future delivery bugs) would leak or lose an entry
+// forever. This makes the cache self-healing: entries missing from the DB are
+// evicted and DB records are (re)upserted.
+func (w *Worker) reconcileInstanceCache() error {
+	// Snapshot the cached names before reading the DB. Only names already
+	// cached before the read are candidates for pruning; an instance created
+	// (and cached via its create event) while we read the DB is left alone.
+	staleCandidates := map[string]struct{}{}
+	for _, instance := range cache.GetAllInstancesCache() {
+		staleCandidates[instance.Name] = struct{}{}
+	}
+
+	instances, err := w.store.ListAllInstances(w.ctx)
+	if err != nil {
+		return fmt.Errorf("listing instances: %w", err)
+	}
+
+	inDB := make(map[string]struct{}, len(instances))
+	for _, instance := range instances {
+		inDB[instance.Name] = struct{}{}
+		cache.SetInstanceCache(instance)
+	}
+
+	pruned := 0
+	for name := range staleCandidates {
+		if _, ok := inDB[name]; !ok {
+			cache.DeleteInstanceCache(name)
+			pruned++
+		}
+	}
+	if pruned > 0 {
+		slog.WarnContext(w.ctx, "pruned stale instances from cache; possible missed delete events", "pruned", pruned)
+	}
+	return nil
+}
+
+func (w *Worker) instanceCacheReconcileLoop() {
+	ticker := time.NewTicker(instanceCacheReconcileInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-w.quit:
+			return
+		case <-w.ctx.Done():
+			return
+		case <-ticker.C:
+			if err := w.reconcileInstanceCache(); err != nil {
+				slog.ErrorContext(w.ctx, "reconciling instance cache", "error", err)
+			}
+		}
+	}
+}
+
 func (w *Worker) loadAllInstances() error {
 	instances, err := w.store.ListAllInstances(w.ctx)
 	if err != nil {
@@ -290,6 +349,7 @@ func (w *Worker) Start() error {
 
 	go w.loop()
 	go w.rateLimitLoop()
+	go w.instanceCacheReconcileLoop()
 	return nil
 }
 
