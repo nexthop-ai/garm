@@ -17,6 +17,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -101,4 +102,38 @@ func TestDeleteRunnerEntryByName(t *testing.T) {
 	require.Len(t, w.runners, 2)
 	require.Contains(t, w.runners, "id-2")
 	require.Contains(t, w.runners, "id-3")
+}
+
+// TestSyncRunnersFromDB asserts that consolidation resyncs the worker-local
+// runner map from the database, dropping stale entries (leaked by missed or
+// reordered watcher events) that would otherwise inflate runnerCount() and
+// starve scale-up, and adopting DB records the worker never saw.
+func TestSyncRunnersFromDB(t *testing.T) {
+	store := mocks.NewStore(t)
+	w := newTestWorker(store)
+	w.offlineSince = map[string]time.Time{
+		"runner-live":  time.Now(),
+		"runner-stale": time.Now(),
+	}
+
+	stale := params.Instance{ID: "id-stale", Name: "runner-stale", Status: commonParams.InstanceRunning}
+	zombie := params.Instance{} // zero-value entry left over by the old ErrNotFound bug
+	live := params.Instance{ID: "id-live", Name: "runner-live", Status: commonParams.InstanceRunning}
+	missed := params.Instance{ID: "id-missed", Name: "runner-missed", Status: commonParams.InstanceRunning}
+
+	w.runners[stale.ID] = stale
+	w.runners["id-zombie"] = zombie
+	w.runners[live.ID] = live
+
+	store.On("ListScaleSetInstances", mock.Anything, w.scaleSet.ID, false).
+		Return([]params.Instance{live, missed}, nil)
+
+	require.NoError(t, w.syncRunnersFromDB())
+
+	require.Equal(t, map[string]params.Instance{
+		live.ID:   live,
+		missed.ID: missed,
+	}, w.runners)
+	require.Contains(t, w.offlineSince, "runner-live")
+	require.NotContains(t, w.offlineSince, "runner-stale")
 }

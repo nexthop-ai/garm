@@ -629,9 +629,94 @@ func (w *Worker) reapTimedOutRunners(runners map[string]params.RunnerReference) 
 	return unlockFn, nil
 }
 
+// syncRunnersFromDB replaces the worker-local runner map with the current
+// database state. The map is otherwise maintained from watcher events; a
+// missed or reordered event would leave a stale entry that inflates
+// runnerCount() and starves scale-up (the autoscaler compares it against the
+// target). The DB is the source of truth and this read is at least as fresh
+// as any event processed so far, so a wholesale replace under the worker
+// mutex is safe. Must be called with w.mux held.
+func (w *Worker) syncRunnersFromDB() error {
+	dbInstances, err := w.store.ListScaleSetInstances(w.ctx, w.scaleSet.ID, false)
+	if err != nil {
+		return fmt.Errorf("listing scale set instances: %w", err)
+	}
+
+	fresh := make(map[string]params.Instance, len(dbInstances))
+	names := make(map[string]struct{}, len(dbInstances))
+	for _, instance := range dbInstances {
+		fresh[instance.ID] = instance
+		names[instance.Name] = struct{}{}
+	}
+	if len(w.runners) != len(fresh) {
+		slog.WarnContext(w.ctx, "worker runner state diverged from database; resyncing",
+			"tracked_runners", len(w.runners), "db_runners", len(fresh))
+	}
+	w.runners = fresh
+
+	// Drop offline tracking for runners that no longer exist.
+	for name := range w.offlineSince {
+		if _, ok := names[name]; !ok {
+			delete(w.offlineSince, name)
+		}
+	}
+	return nil
+}
+
+// syncRunnerStatusFromGithub mirrors github's view of a runner (online
+// idle/busy or offline) onto the instance record. Must be called with w.mux
+// held.
+func (w *Worker) syncRunnerStatusFromGithub(name string, dbRunner params.Instance, status params.RunnerStatus) {
+	// Sync github's view of the runner (online idle/busy or offline) onto
+	// the instance. Without this, a runner whose agent died after setup
+	// stays "idle" in GARM forever, while github considers it offline and
+	// never assigns it jobs. Only touch runners that finished installing;
+	// runners in earlier lifecycle states are expected to be offline.
+	switch dbRunner.RunnerStatus {
+	case params.RunnerIdle, params.RunnerActive, params.RunnerOffline:
+	default:
+		return
+	}
+	switch status {
+	case params.RunnerIdle, params.RunnerActive, params.RunnerOffline:
+	default:
+		return
+	}
+	if dbRunner.RunnerStatus == status {
+		return
+	}
+	if dbRunner.RunnerStatus == params.RunnerActive && status == params.RunnerIdle {
+		// The github runners list is NOT a reliable busy indicator for
+		// scale set runners: it reports "idle" for runners that are
+		// actively executing a job (observed 2026-08-07: reaping on this
+		// signal cancelled ~150 running jobs). Never touch active runners
+		// based on the list; job completion/failure is handled by the
+		// listener and the offline reaper covers dead agents.
+		return
+	}
+	if ok := locking.TryLock(name, w.consumerID); !ok {
+		slog.DebugContext(w.ctx, "runner is locked; skipping runner status sync", "runner_name", name)
+		return
+	}
+	slog.InfoContext(w.ctx, "syncing runner status from github", "runner_name", name, "old_status", dbRunner.RunnerStatus, "new_status", status)
+	updatedRunner, err := w.store.UpdateInstance(w.ctx, name, params.UpdateInstanceParams{RunnerStatus: status})
+	locking.Unlock(name, false)
+	if err != nil {
+		if !errors.Is(err, runnerErrors.ErrNotFound) {
+			slog.ErrorContext(w.ctx, "error updating runner status", "runner_name", name, "error", err)
+		}
+		return
+	}
+	w.runners[updatedRunner.ID] = updatedRunner
+}
+
 func (w *Worker) consolidateRunnerState(listedAt time.Time, runners []params.RunnerReference) error {
 	w.mux.Lock()
 	defer w.mux.Unlock()
+
+	if err := w.syncRunnersFromDB(); err != nil {
+		return fmt.Errorf("syncing runners from the database: %w", err)
+	}
 
 	ghRunnersByName := make(map[string]params.RunnerReference)
 	for _, runner := range runners {
@@ -661,47 +746,7 @@ func (w *Worker) consolidateRunnerState(listedAt time.Time, runners []params.Run
 			continue
 		}
 
-		// Sync github's view of the runner (online idle/busy or offline) onto
-		// the instance. Without this, a runner whose agent died after setup
-		// stays "idle" in GARM forever, while github considers it offline and
-		// never assigns it jobs. Only touch runners that finished installing;
-		// runners in earlier lifecycle states are expected to be offline.
-		switch dbRunner.RunnerStatus {
-		case params.RunnerIdle, params.RunnerActive, params.RunnerOffline:
-		default:
-			continue
-		}
-		switch status {
-		case params.RunnerIdle, params.RunnerActive, params.RunnerOffline:
-		default:
-			continue
-		}
-		if dbRunner.RunnerStatus == status {
-			continue
-		}
-		if dbRunner.RunnerStatus == params.RunnerActive && status == params.RunnerIdle {
-			// The github runners list is NOT a reliable busy indicator for
-			// scale set runners: it reports "idle" for runners that are
-			// actively executing a job (observed 2026-08-07: reaping on this
-			// signal cancelled ~150 running jobs). Never touch active runners
-			// based on the list; job completion/failure is handled by the
-			// listener and the offline reaper covers dead agents.
-			continue
-		}
-		if ok := locking.TryLock(name, w.consumerID); !ok {
-			slog.DebugContext(w.ctx, "runner is locked; skipping runner status sync", "runner_name", name)
-			continue
-		}
-		slog.InfoContext(w.ctx, "syncing runner status from github", "runner_name", name, "old_status", dbRunner.RunnerStatus, "new_status", status)
-		updatedRunner, err := w.store.UpdateInstance(w.ctx, name, params.UpdateInstanceParams{RunnerStatus: status})
-		locking.Unlock(name, false)
-		if err != nil {
-			if !errors.Is(err, runnerErrors.ErrNotFound) {
-				slog.ErrorContext(w.ctx, "error updating runner status", "runner_name", name, "error", err)
-			}
-			continue
-		}
-		w.runners[updatedRunner.ID] = updatedRunner
+		w.syncRunnerStatusFromGithub(name, dbRunner, status)
 	}
 
 	unlockFn, err := w.reapTimedOutRunners(ghRunnersByName)
