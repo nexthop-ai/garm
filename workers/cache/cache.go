@@ -199,6 +199,7 @@ func (w *Worker) reconcileInstanceCache() error {
 		}
 	}
 	if pruned > 0 {
+		metrics.CacheInstancesPrunedCount.Add(float64(pruned))
 		slog.WarnContext(w.ctx, "pruned stale instances from cache; possible missed delete events", "pruned", pruned)
 	}
 	return nil
