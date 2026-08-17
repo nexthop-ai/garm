@@ -18,6 +18,7 @@ import (
 	"context"
 	"strconv"
 
+	"github.com/cloudbase/garm/cache"
 	"github.com/cloudbase/garm/metrics"
 	"github.com/cloudbase/garm/runner"
 )
@@ -38,6 +39,11 @@ func CollectInstanceMetric(ctx context.Context, r *runner.Runner) error {
 	if err != nil {
 		return err
 	}
+
+	// Sample the in-memory cache against the DB listing above. Sustained
+	// divergence means the event-driven cache is leaking or losing entries.
+	metrics.CacheDBInstancesCount.Set(float64(len(instances)))
+	metrics.CacheInstancesCount.Set(float64(len(cache.GetAllInstancesCache())))
 
 	pools, err := r.ListAllPools(ctx)
 	if err != nil {

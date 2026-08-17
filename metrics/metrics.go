@@ -33,6 +33,7 @@ const (
 	metricsGithubSubsystem       = "github"
 	metricsJobsSubsystem         = "job"
 	metricsWatcherSubsystem      = "watcher"
+	metricsCacheSubsystem        = "cache"
 )
 
 // RegisterMetrics registers all the metrics
@@ -70,6 +71,10 @@ func RegisterMetrics() error {
 		ScaleSetBootstrapTimeout,
 		// health metrics
 		GarmHealth,
+		// cache consistency metrics
+		CacheInstancesCount,
+		CacheDBInstancesCount,
+		CacheInstancesPrunedCount,
 
 		// metrics used within normal garm operations
 		// e.g. count instance creations, count github api calls, ...
