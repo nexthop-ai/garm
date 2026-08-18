@@ -89,6 +89,16 @@ func RegisterMetrics() error {
 		WebhooksReceived,
 		// job queue metrics
 		JobCount,
+		// job queue latency, observed as jobs start
+		JobQueueDuration,
+		// scale set statistics, reported by GitHub on every message queue response
+		ScaleSetGHAvailableJobs,
+		ScaleSetGHAcquiredJobs,
+		ScaleSetGHAssignedJobs,
+		ScaleSetGHRunningJobs,
+		ScaleSetGHRegisteredRunners,
+		ScaleSetGHBusyRunners,
+		ScaleSetGHIdleRunners,
 	)
 
 	for _, c := range collectors {

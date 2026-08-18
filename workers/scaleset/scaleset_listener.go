@@ -22,6 +22,7 @@ import (
 	"sync/atomic"
 
 	runnerErrors "github.com/cloudbase/garm-provider-common/errors"
+	"github.com/cloudbase/garm/metrics"
 	"github.com/cloudbase/garm/params"
 	garmUtil "github.com/cloudbase/garm/util"
 	"github.com/cloudbase/garm/util/github/scalesets"
@@ -142,6 +143,19 @@ func (l *scaleSetListener) handleSessionMessage(msg params.RunnerScaleSetMessage
 	l.mux.Lock()
 	defer l.mux.Unlock()
 
+	// Statistics ride along on the envelope of every message, regardless of
+	// type, and they are the forge's own accounting: TotalAvailableJobs is the
+	// real queue depth, not capped by the capacity we advertise when
+	// longpolling. Persist them before the message type filter and before the
+	// early returns further down, so the scale set carries GitHub's latest view
+	// even when the message is one we take no action on. The metrics collector
+	// reads them back from here to populate garm_scaleset_gh_*.
+	if msg.Statistics != nil {
+		if err := l.scaleSetHelper.SetRunnerStatistics(*msg.Statistics); err != nil {
+			slog.ErrorContext(l.ctx, "setting runner statistics", "error", err)
+		}
+	}
+
 	if params.ScaleSetMessageType(msg.MessageType) != params.MessageTypeRunnerScaleSetJobMessages {
 		slog.DebugContext(l.ctx, "message is not a job message, ignoring")
 		return
@@ -209,6 +223,15 @@ func (l *scaleSetListener) handleSessionMessage(msg params.RunnerScaleSetMessage
 	}
 
 	if len(startedJobs) > 0 {
+		// JobStarted carries the forge's own queue and runner assign
+		// timestamps, which is the only trustworthy source for queue latency.
+		// Our receive time is useless here: GitHub withholds job messages
+		// beyond the runner capacity we advertise when longpolling.
+		for _, job := range startedJobs {
+			metrics.ObserveJobQueueDuration(
+				metrics.JobQueueSourceScaleSet, job.RequestLabels,
+				job.QueueTime, job.RunnerAssignTime)
+		}
 		if err := l.scaleSetHelper.HandleJobsStarted(startedJobs); err != nil {
 			slog.ErrorContext(l.ctx, "error handling started jobs", "error", err)
 			return
@@ -226,12 +249,6 @@ func (l *scaleSetListener) handleSessionMessage(msg params.RunnerScaleSetMessage
 		slog.ErrorContext(l.ctx, "setting last message ID", "error", err)
 	} else {
 		l.lastMessageID = msg.MessageID
-	}
-
-	if msg.Statistics != nil {
-		if err := l.scaleSetHelper.SetRunnerStatistics(*msg.Statistics); err != nil {
-			slog.ErrorContext(l.ctx, "setting runner statistics", "error", err)
-		}
 	}
 
 	if err := l.messageSession.DeleteMessage(l.listenerCtx, msg.MessageID); err != nil {
