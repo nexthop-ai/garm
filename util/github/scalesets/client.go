@@ -31,7 +31,7 @@ import (
 func NewClient(cli common.GithubClient) (*ScaleSetClient, error) {
 	return &ScaleSetClient{
 		ghCli:      cli,
-		httpClient: &http.Client{},
+		httpClient: params.NewHTTPClient(),
 	}, nil
 }
 

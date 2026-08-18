@@ -198,6 +198,8 @@ func main() {
 		log.Fatalf("Fetching config: %+v", err) //nolint:gocritic
 	}
 
+	params.SetHTTP2HealthChecks(cfg.Default.HTTP2ReadIdleTimeout.Duration(), cfg.Default.HTTP2PingTimeout.Duration())
+
 	logCfg := cfg.GetLoggingConfig()
 	var hub *websocket.Hub
 	if logCfg.EnableLogStreamer != nil && *logCfg.EnableLogStreamer {
