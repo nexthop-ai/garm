@@ -56,7 +56,13 @@ const mockScaleSets = [
 		max_runners: 100,
 		min_idle_runners: 32,
 		desired_runner_count: 60,
-		statistics: { totalAssignedJobs: 60, totalBusyRunners: 40, totalIdleRunners: 2 },
+		statistics: {
+			totalAvailableJobs: 12,
+			totalAssignedJobs: 60,
+			totalBusyRunners: 40,
+			totalIdleRunners: 2,
+			updated_at: new Date(Date.now() - 30_000).toISOString()
+		},
 		enabled: true
 	},
 	{
@@ -65,6 +71,8 @@ const mockScaleSets = [
 		org_id: 'org-uuid',
 		org_name: 'nexthop',
 		max_runners: 10,
+		// Saturated: GARM has no job rows and no instances for it yet, GitHub is holding 3.
+		statistics: { totalAvailableJobs: 3, totalAssignedJobs: 10 },
 		enabled: true
 	}
 ];
@@ -194,8 +202,15 @@ describe('Queue Page - Integration Tests', () => {
 			screen.getByText(/3 runners \/ 100 max \(1 busy, 1 idle, 1 offline, 2 provisioning\)/)
 		).toBeInTheDocument();
 
-		// GitHub's view from the scale set statistics
-		expect(screen.getByText(/GitHub: 60 assigned \(40 busy, 2 idle\)/)).toBeInTheDocument();
+		// GitHub's view from the scale set statistics, with the age of the sample
+		expect(screen.getByText(/GitHub: 60 assigned \(40 busy, 2 idle\), \d+s ago/)).toBeInTheDocument();
+		// Jobs GitHub is still holding back are counted even though GARM has no rows for them
+		expect(screen.getByText('+12 queued on GitHub')).toBeInTheDocument();
+		// A scale set with nothing visible to GARM still shows up when GitHub holds a backlog
+		expect(screen.getByRole('heading', { name: 'cloudstack-ubuntu24-large' })).toBeInTheDocument();
+		expect(
+			screen.getByText(/No jobs handed to GARM yet; GitHub is holding 3 queued/)
+		).toBeInTheDocument();
 		expect(
 			screen.getByRole('heading', { name: 'cloudstack-ubuntu24-micro' }).querySelector('a')
 		).toHaveAttribute('href', '/scalesets/5');
@@ -233,6 +248,12 @@ describe('Queue Page - Integration Tests', () => {
 	it('shows empty state when there are no active jobs', async () => {
 		vi.mocked(garmApi.listJobs).mockResolvedValue([]);
 		vi.mocked(garmApi.listInstances).mockResolvedValue([]);
+		// A scale set GitHub reports a backlog for is shown even without jobs,
+		// so the empty state needs scale sets with nothing pending upstream.
+		const cacheModule = await import('$lib/stores/eager-cache.js');
+		vi.mocked(cacheModule.eagerCacheManager.getScaleSets).mockResolvedValue(
+			mockScaleSets.map((s) => ({ ...s, statistics: undefined }))
+		);
 		render(QueuePage);
 
 		await waitFor(() => {

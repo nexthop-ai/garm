@@ -3046,6 +3046,12 @@ export interface RunnerScaleSetStatistic {
     'totalRegisteredRunners'?: number;
     'totalBusyRunners'?: number;
     'totalIdleRunners'?: number;
+    /**
+     * UpdatedAt is when GARM received this statistic from GitHub.
+     * @type {string}
+     * @memberof RunnerScaleSetStatistic
+     */
+    'updated_at'?: string;
 }
 export interface ScaleSet {
     /**
