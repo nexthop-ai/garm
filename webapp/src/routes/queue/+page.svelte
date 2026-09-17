@@ -2,7 +2,7 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { resolve } from '$app/paths';
 	import { garmApi } from '$lib/api/client.js';
-	import type { Instance, Job, Pool, ScaleSet } from '$lib/api/generated/api.js';
+	import type { Instance, Job, Pool, RunnerScaleSetStatistic, ScaleSet } from '$lib/api/generated/api.js';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import { websocketStore, type WebSocketEvent } from '$lib/stores/websocket.js';
 	import { eagerCacheManager } from '$lib/stores/eager-cache.js';
@@ -34,19 +34,29 @@
 		runners: number;
 		busyRunners: number;
 		idleRunners: number;
-		// TotalAssignedJobs as reported by GitHub for scale sets; includes jobs
-		// GitHub has not yet sent individual messages for.
-		githubAssigned?: number;
+		// Runners whose agent GitHub reports as offline (won't receive jobs).
+		offlineRunners: number;
+		// Instances GARM is still creating (not yet in running state).
+		provisioning: number;
+		// GitHub's own view of the scale set (busy/idle runners, assigned jobs),
+		// from the last message session statistics. Divergence from the GARM
+		// instance counts usually means runners GitHub considers offline/gone.
+		githubStats?: RunnerScaleSetStatistic;
 		queued: Job[];
 		inProgress: Job[];
 	}
 
 	function runnerCounts(list: Instance[]) {
 		const running = list.filter((i) => i.status === 'running');
+		const provisioning = list.filter((i) =>
+			['pending_create', 'creating', 'pending'].includes(i.status || '')
+		);
 		return {
 			runners: running.length,
 			busyRunners: running.filter((i) => i.runner_status === 'active').length,
-			idleRunners: running.filter((i) => i.runner_status === 'idle').length
+			idleRunners: running.filter((i) => i.runner_status === 'idle').length,
+			offlineRunners: running.filter((i) => i.runner_status === 'offline').length,
+			provisioning: provisioning.length
 		};
 	}
 
@@ -93,7 +103,8 @@
 			q.forEach((j) => attributed.add(j.id!));
 			r.forEach((j) => attributed.add(j.id!));
 			const counts = runnerCounts(instanceList.filter((i) => i.scale_set_id === set.id));
-			if (q.length === 0 && r.length === 0 && counts.runners === 0) continue;
+			const hidden = set.statistics?.totalAvailableJobs ?? 0;
+			if (q.length === 0 && r.length === 0 && counts.runners === 0 && hidden === 0) continue;
 			groups.push({
 				key: `scaleset-${set.id}`,
 				kind: 'scaleset',
@@ -102,7 +113,7 @@
 				href: resolve(`/scalesets/${set.id}`),
 				maxRunners: set.max_runners,
 				...counts,
-				githubAssigned: set.desired_runner_count,
+				githubStats: set.statistics,
 				queued: q,
 				inProgress: r
 			});
@@ -143,14 +154,34 @@
 				runners: 0,
 				busyRunners: 0,
 				idleRunners: 0,
+				offlineRunners: 0,
+				provisioning: 0,
 				queued: leftoverQueued,
 				inProgress: leftoverRunning
 			});
 		}
 
-		// Busiest queues first.
-		groups.sort((a, b) => b.queued.length - a.queued.length);
+		// Alphabetical, so the layout is stable across refreshes.
+		groups.sort((a, b) => a.title.localeCompare(b.title));
 		return groups;
+	}
+
+	// Jobs GitHub is still holding for this scale set. GitHub only hands job
+	// messages to GARM up to the capacity GARM advertises (max_runners), so
+	// during saturation these never show up as rows below, yet they are the
+	// real length of the line. GitHub reports the count on every message.
+	function hiddenQueued(group: QueueGroup): number {
+		return group.githubStats?.totalAvailableJobs ?? 0;
+	}
+
+	function statsAge(group: QueueGroup): string {
+		const at = (group.githubStats as { updated_at?: string } | undefined)?.updated_at;
+		if (!at) return '';
+		const seconds = Math.max(0, Math.floor((currentTime - new Date(at).getTime()) / 1000));
+		if (seconds < 60) return `${seconds}s ago`;
+		const m = Math.floor(seconds / 60);
+		if (m < 60) return `${m}m ago`;
+		return `${Math.floor(m / 60)}h ${m % 60}m ago`;
 	}
 
 	function waitingFor(job: Job): string {
@@ -314,20 +345,29 @@
 						<span class="inline-flex items-center px-2.5 py-0.5 rounded-full font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200">
 							{group.queued.length} queued
 						</span>
-						{#if group.githubAssigned !== undefined && group.githubAssigned > group.queued.length + group.inProgress.length}
-							<span class="inline-flex items-center px-2.5 py-0.5 rounded-full font-medium bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200" title="TotalAssignedJobs reported by GitHub; includes jobs GitHub has not yet delivered to GARM">
-							{group.githubAssigned} assigned on GitHub
+						{#if hiddenQueued(group) > 0}
+							<span class="inline-flex items-center px-2.5 py-0.5 rounded-full font-medium bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200" title="Jobs queued on GitHub for this scale set that GitHub has not handed to GARM yet. GitHub only releases job messages up to max_runners, so during saturation these jobs are invisible to GARM and are not listed below, but they are ahead of any new job in the line.">
+							+{hiddenQueued(group)} queued on GitHub
 							</span>
 						{/if}
-						<span class="inline-flex items-center px-2.5 py-0.5 rounded-full font-medium bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200" title="Runner instances in running state (busy = running a job, idle = waiting for work)">
-							{group.runners} runners{group.maxRunners ? ` / ${group.maxRunners} max` : ''} ({group.busyRunners} busy, {group.idleRunners} idle)
+						{#if group.githubStats}
+							<span class="inline-flex items-center px-2.5 py-0.5 rounded-full font-medium bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200" title="GitHub's view of this scale set from the last session message{statsAge(group) ? ` (received ${statsAge(group)})` : ''}: assigned jobs (queued + running) and busy/idle runners. Divergence from the runner counts usually means runners GitHub considers offline.">
+							GitHub: {group.githubStats.totalAssignedJobs ?? 0} assigned ({group.githubStats.totalBusyRunners ?? 0} busy, {group.githubStats.totalIdleRunners ?? 0} idle){statsAge(group) ? `, ${statsAge(group)}` : ''}
+							</span>
+						{/if}
+						<span class="inline-flex items-center px-2.5 py-0.5 rounded-full font-medium bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200" title="GARM runner instances: running (busy = running a job, idle = waiting for work) plus instances still being provisioned">
+							{group.runners} runners{group.maxRunners ? ` / ${group.maxRunners} max` : ''} ({group.busyRunners} busy, {group.idleRunners} idle{group.offlineRunners ? `, ${group.offlineRunners} offline` : ''}{group.provisioning ? `, ${group.provisioning} provisioning` : ''})
 						</span>
 					</div>
 				</div>
 
 				{#if group.queued.length === 0}
 					<div class="px-4 py-4 sm:px-6 text-sm text-gray-500 dark:text-gray-400">
-						Queue is empty.
+						{#if hiddenQueued(group) > 0}
+							No jobs handed to GARM yet; GitHub is holding {hiddenQueued(group)} queued for this scale set.
+						{:else}
+							Queue is empty.
+						{/if}
 					</div>
 				{:else}
 					<div class="overflow-x-auto">
