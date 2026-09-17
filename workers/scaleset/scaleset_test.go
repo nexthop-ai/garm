@@ -112,28 +112,28 @@ func TestSyncRunnersFromDB(t *testing.T) {
 	store := mocks.NewStore(t)
 	w := newTestWorker(store)
 	w.offlineSince = map[string]time.Time{
-		"runner-real":  time.Now(),
+		"runner-live":  time.Now(),
 		"runner-stale": time.Now(),
 	}
 
 	stale := params.Instance{ID: "id-stale", Name: "runner-stale", Status: commonParams.InstanceRunning}
 	zombie := params.Instance{} // zero-value entry left over by the old ErrNotFound bug
-	real := params.Instance{ID: "id-real", Name: "runner-real", Status: commonParams.InstanceRunning}
+	live := params.Instance{ID: "id-live", Name: "runner-live", Status: commonParams.InstanceRunning}
 	missed := params.Instance{ID: "id-missed", Name: "runner-missed", Status: commonParams.InstanceRunning}
 
 	w.runners[stale.ID] = stale
 	w.runners["id-zombie"] = zombie
-	w.runners[real.ID] = real
+	w.runners[live.ID] = live
 
 	store.On("ListScaleSetInstances", mock.Anything, w.scaleSet.ID, false).
-		Return([]params.Instance{real, missed}, nil)
+		Return([]params.Instance{live, missed}, nil)
 
 	require.NoError(t, w.syncRunnersFromDB())
 
 	require.Equal(t, map[string]params.Instance{
-		real.ID:   real,
+		live.ID:   live,
 		missed.ID: missed,
 	}, w.runners)
-	require.Contains(t, w.offlineSince, "runner-real")
+	require.Contains(t, w.offlineSince, "runner-live")
 	require.NotContains(t, w.offlineSince, "runner-stale")
 }

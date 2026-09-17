@@ -677,7 +677,7 @@ func (a *APIController) OIDCCallbackHandler(w http.ResponseWriter, r *http.Reque
 	// Set cookies for the webapp
 	// Token cookie - NOT HttpOnly because the webapp JavaScript needs to read it
 	// to set it in the API client for authenticated requests
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: the webapp reads the token from JavaScript; Secure/SameSite are set below
 		Name:     "garm_token",
 		Value:    tokenString,
 		Path:     "/",
@@ -688,7 +688,7 @@ func (a *APIController) OIDCCallbackHandler(w http.ResponseWriter, r *http.Reque
 	})
 
 	// User cookie - accessible to JavaScript for display purposes
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: display-only, read from JavaScript; Secure/SameSite are set below
 		Name:     "garm_user",
 		Value:    userName,
 		Path:     "/",
