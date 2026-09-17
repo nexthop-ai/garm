@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"gorm.io/datatypes"
@@ -539,6 +540,7 @@ func (s *sqlDatabase) SetScaleSetRunnerStatistics(_ context.Context, scaleSetID 
 		if err != nil {
 			return fmt.Errorf("error fetching scale set: %w", err)
 		}
+		stats.UpdatedAt = time.Now().UTC()
 		asJSON, err := json.Marshal(stats)
 		if err != nil {
 			return fmt.Errorf("error marshaling runner statistics: %w", err)
