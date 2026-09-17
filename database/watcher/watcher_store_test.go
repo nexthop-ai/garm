@@ -602,10 +602,16 @@ func (s *WatcherStoreTestSuite) TestScaleSetWatcher() {
 	case event := <-consumer.Watch():
 		// We updated last message ID and runner statistics above.
 		updatedScaleSet.DesiredRunnerCount = 5
-		updatedScaleSet.Statistics = &params.RunnerScaleSetStatistic{TotalAssignedJobs: 5}
 		updatedScaleSet.LastMessageID = 99
 		payloadFromEvent, ok := event.Payload.(params.ScaleSet)
 		s.Require().True(ok)
+		// The store stamps the statistics with the time it received them.
+		s.Require().NotNil(payloadFromEvent.Statistics)
+		s.Require().False(payloadFromEvent.Statistics.UpdatedAt.IsZero())
+		updatedScaleSet.Statistics = &params.RunnerScaleSetStatistic{
+			TotalAssignedJobs: 5,
+			UpdatedAt:         payloadFromEvent.Statistics.UpdatedAt,
+		}
 		updatedScaleSet.UpdatedAt = payloadFromEvent.UpdatedAt
 		updatedScaleSet.CreatedAt = payloadFromEvent.CreatedAt
 		updatedScaleSet.Endpoint = params.ForgeEndpoint{}
