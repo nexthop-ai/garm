@@ -481,7 +481,7 @@ type WorkflowJob struct {
 	// ScaleSetFkID is the ID of the scale set that this job was assigned to,
 	// if the job came in through a scale set listener.
 	ScaleSetFkID *uint    `gorm:"index"`
-	ScaleSet     ScaleSet `gorm:"foreignKey:ScaleSetFkID"`
+	ScaleSet     ScaleSet `gorm:"foreignKey:ScaleSetFkID;constraint:OnDelete:SET NULL"`
 
 	// RunID is the ID of the workflow run. A run may have multiple jobs.
 	RunID int64
