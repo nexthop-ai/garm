@@ -157,18 +157,6 @@ func (l *scaleSetListener) scaleSetIDLabel() string {
 	return strconv.FormatUint(uint64(l.scaleSetHelper.GetScaleSet().ID), 10)
 }
 
-// recordStatistics publishes the scale set statistics GitHub reports alongside
-// every message queue response. TotalAvailableJobs is the forge side queue
-// depth and, unlike anything GARM derives from job messages, it is not capped
-// by the capacity we advertise to the message queue.
-func (l *scaleSetListener) recordStatistics(stats *params.RunnerScaleSetStatistic) {
-	if stats == nil {
-		return
-	}
-	scaleSet := l.scaleSetHelper.GetScaleSet()
-	metrics.RecordScaleSetStatistics(scaleSet.Name, scaleSet.ProviderName, stats)
-}
-
 func (l *scaleSetListener) handleSessionMessage(msg params.RunnerScaleSetMessage) {
 	l.mux.Lock()
 	defer l.mux.Unlock()
@@ -177,13 +165,13 @@ func (l *scaleSetListener) handleSessionMessage(msg params.RunnerScaleSetMessage
 	// and they are GitHub's own accounting: TotalAvailableJobs is the real
 	// queue depth, not capped by the capacity we advertise when long
 	// polling. Persist them before the type filter and the early returns
-	// below so the scale set always carries GitHub's latest view.
+	// below so the scale set always carries GitHub's latest view. The
+	// metrics collector reads them back to populate garm_scaleset_gh_*.
 	if msg.Statistics != nil {
 		if err := l.scaleSetHelper.SetRunnerStatistics(*msg.Statistics); err != nil {
 			slog.ErrorContext(l.ctx, "setting runner statistics", "error", err)
 		}
 	}
-	l.recordStatistics(msg.Statistics)
 
 	if params.ScaleSetMessageType(msg.MessageType) != params.MessageTypeRunnerScaleSetJobMessages {
 		slog.DebugContext(l.ctx, "message is not a job message, ignoring")

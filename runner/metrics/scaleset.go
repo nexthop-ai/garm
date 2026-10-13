@@ -28,6 +28,7 @@ const unknownEntityValue = "unknown"
 func CollectScaleSetMetric(ctx context.Context, r *runner.Runner) error {
 	// reset metrics
 	metrics.ScaleSetStatus.Reset()
+	metrics.ResetScaleSetGHStatistics()
 
 	scalesets, err := r.ListAllScaleSets(ctx)
 	if err != nil {
@@ -65,6 +66,10 @@ func CollectScaleSetMetric(ctx context.Context, r *runner.Runner) error {
 			entityName,       // label: entity_name
 			ss.ProviderName,  // label: provider
 		).Set(value)
+
+		// Statistics is nil until the listener has seen its first message queue
+		// response, so a freshly created scale set simply reports no gh_ series.
+		metrics.RecordScaleSetGHStatistics(ss.Name, ss.ProviderName, ss.Statistics)
 	}
 
 	return nil
