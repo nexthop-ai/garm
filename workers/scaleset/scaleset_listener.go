@@ -245,15 +245,6 @@ func (l *scaleSetListener) handleSessionMessage(msg params.RunnerScaleSetMessage
 	}
 
 	if len(startedJobs) > 0 {
-		// JobStarted carries the forge's own queue and runner assign
-		// timestamps, which is the only trustworthy source for queue latency.
-		// Our receive time is useless here: GitHub withholds job messages
-		// beyond the runner capacity we advertise when longpolling.
-		for _, job := range startedJobs {
-			metrics.ObserveJobForgeQueueDuration(
-				metrics.JobQueueSourceScaleSet, job.RequestLabels,
-				job.QueueTime, job.RunnerAssignTime)
-		}
 		if err := l.scaleSetHelper.HandleJobsStarted(startedJobs); err != nil {
 			slog.ErrorContext(l.ctx, "error handling started jobs", "error", err)
 			return
