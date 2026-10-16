@@ -1413,7 +1413,9 @@ func (r *basePoolManager) scaleDownOnePool(ctx context.Context, pool params.Pool
 		}
 
 		for _, job := range queued {
-			if time.Since(job.CreatedAt).Minutes() > 10 && pool.HasRequiredLabels(job.Labels) {
+			// CreatedAt is the forge's queue time, which may already be old when
+			// GARM first records the job, so age it from GARM's last write.
+			if time.Since(job.UpdatedAt).Minutes() > 10 && pool.HasRequiredLabels(job.Labels) {
 				if err := r.store.DeleteJob(ctx, job.WorkflowJobID); err != nil && !errors.Is(err, runnerErrors.ErrNotFound) {
 					slog.With(slog.Any("error", err)).ErrorContext(
 						ctx, "failed to delete job",

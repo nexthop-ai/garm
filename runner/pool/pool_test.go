@@ -811,6 +811,52 @@ func (s *PoolStressTestSuite) TestHandleWorkflowJobStoresForgeCreatedAt() {
 	s.True(stored.CreatedAt.Equal(createdAt), "stored CreatedAt = %v, want %v", stored.CreatedAt, createdAt)
 }
 
+// TestScaleDownKeepsLongForgeQueuedJob verifies that the stale queued job
+// cleanup after a scale-down does not delete a job GARM only just recorded,
+// even though it was queued on the forge long ago.
+func (s *PoolStressTestSuite) TestScaleDownKeepsLongForgeQueuedJob() {
+	// scaleDownOnePool locks the instances it removes. The locker is process
+	// global, so another test in this binary may already have registered one.
+	locker, err := locking.NewLocalLocker(s.adminCtx, s.store)
+	s.Require().NoError(err)
+	if err := locking.RegisterLocker(locker); err != nil {
+		s.Require().ErrorContains(err, "already registered")
+	}
+
+	labels := []string{"self-hosted", "linux", "x64"}
+
+	for i := 0; i < 2; i++ {
+		_, err := s.store.CreateInstance(s.adminCtx, s.pool.ID, params.CreateInstanceParams{
+			Name:         fmt.Sprintf("idle-runner-%d", i),
+			OSType:       "linux",
+			OSArch:       "amd64",
+			Status:       commonParams.InstanceRunning,
+			RunnerStatus: params.RunnerIdle,
+		})
+		s.Require().NoError(err)
+	}
+
+	queuedJob := s.makeWorkflowJob(2301, "queued", "queued", "", labels)
+	queuedJob.WorkflowJob.CreatedAt = time.Now().Add(-time.Hour)
+	s.Require().NoError(s.mgr.HandleWorkflowJob(queuedJob))
+
+	s.Require().NoError(s.mgr.scaleDownOnePool(s.adminCtx, s.pool))
+
+	instances, err := s.store.ListPoolInstances(s.adminCtx, s.pool.ID, false)
+	s.Require().NoError(err)
+	pendingDelete := 0
+	for _, inst := range instances {
+		if inst.Status == commonParams.InstancePendingDelete {
+			pendingDelete++
+		}
+	}
+	s.Require().Positive(pendingDelete, "the pool must have scaled down for the cleanup to run")
+
+	job, err := s.store.GetJobByID(s.adminCtx, 2301)
+	s.Require().NoError(err, "a recently recorded queued job must survive the cleanup")
+	s.Equal(string(params.JobStatusQueued), job.Status)
+}
+
 func mustParseUUID(s string) uuid.UUID {
 	u, err := uuid.Parse(s)
 	if err != nil {
