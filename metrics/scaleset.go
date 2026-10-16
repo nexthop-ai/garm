@@ -16,7 +16,13 @@ package metrics
 
 import (
 	"github.com/prometheus/client_golang/prometheus"
+
+	"github.com/cloudbase/garm/params"
 )
+
+// scaleSetStatsLabels are the labels used by the scale set statistics gauges.
+// They mirror the low cardinality naming used by the other scaleset metrics.
+var scaleSetStatsLabels = []string{"scaleset_name", "provider"}
 
 var (
 	// ScaleSetStatus reports the status of each scaleset.
@@ -47,4 +53,107 @@ var (
 		Name:      "job_count",
 		Help:      "Count of jobs per scaleset by status",
 	}, []string{"scaleset_name", "status"})
+
+	// The gauges below mirror the statistics GitHub attaches to every message
+	// queue response. Unlike ScaleSetJobCount, which only knows about jobs GARM
+	// has been told about, these are GitHub's own view of the scale set. They
+	// carry a gh_ prefix so nobody mistakes them for GARM's own counts, which
+	// can and do disagree with GitHub.
+	ScaleSetGHAvailableJobs = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: metricsNamespace,
+		Subsystem: metricsScaleSetSubsystem,
+		Name:      "gh_available_jobs",
+		Help:      "Jobs queued on the forge and available to the scale set, as reported by GitHub",
+	}, scaleSetStatsLabels)
+
+	ScaleSetGHAcquiredJobs = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: metricsNamespace,
+		Subsystem: metricsScaleSetSubsystem,
+		Name:      "gh_acquired_jobs",
+		Help:      "Jobs acquired from the scale set queue, as reported by GitHub",
+	}, scaleSetStatsLabels)
+
+	ScaleSetGHAssignedJobs = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: metricsNamespace,
+		Subsystem: metricsScaleSetSubsystem,
+		Name:      "gh_assigned_jobs",
+		Help:      "Jobs assigned to the scale set, as reported by GitHub",
+	}, scaleSetStatsLabels)
+
+	ScaleSetGHRunningJobs = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: metricsNamespace,
+		Subsystem: metricsScaleSetSubsystem,
+		Name:      "gh_running_jobs",
+		Help:      "Jobs currently running on the scale set, as reported by GitHub",
+	}, scaleSetStatsLabels)
+
+	ScaleSetGHRegisteredRunners = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: metricsNamespace,
+		Subsystem: metricsScaleSetSubsystem,
+		Name:      "gh_registered_runners",
+		Help:      "Runners registered with the scale set, as reported by GitHub",
+	}, scaleSetStatsLabels)
+
+	ScaleSetGHBusyRunners = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: metricsNamespace,
+		Subsystem: metricsScaleSetSubsystem,
+		Name:      "gh_busy_runners",
+		Help:      "Registered runners currently executing a job, as reported by GitHub",
+	}, scaleSetStatsLabels)
+
+	ScaleSetGHIdleRunners = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: metricsNamespace,
+		Subsystem: metricsScaleSetSubsystem,
+		Name:      "gh_idle_runners",
+		Help:      "Registered runners currently idle, as reported by GitHub",
+	}, scaleSetStatsLabels)
 )
+
+// scaleSetGHStatGauges is the set of gauges fed from RunnerScaleSetStatistic,
+// used to reset them all together on each collection pass.
+var scaleSetGHStatGauges = []*prometheus.GaugeVec{
+	ScaleSetGHAvailableJobs,
+	ScaleSetGHAcquiredJobs,
+	ScaleSetGHAssignedJobs,
+	ScaleSetGHRunningJobs,
+	ScaleSetGHRegisteredRunners,
+	ScaleSetGHBusyRunners,
+	ScaleSetGHIdleRunners,
+}
+
+// ResetScaleSetGHStatistics clears the GitHub reported scale set gauges. The
+// collector calls this before repopulating them so that scale sets which have
+// been deleted stop reporting instead of holding their last value forever.
+func ResetScaleSetGHStatistics() {
+	for _, gauge := range scaleSetGHStatGauges {
+		gauge.Reset()
+	}
+}
+
+// RecordScaleSetGHStatistics publishes the statistics GitHub reports for a
+// scale set. TotalAvailableJobs is the real forge side queue depth: it is not
+// gated by the capacity GARM advertises when longpolling for messages, which is
+// what makes garm_job_count{status="queued"} and garm_scaleset_job_count
+// underreport the backlog during saturation.
+//
+// The statistics are read off the scale set, where the listener stores whatever
+// GitHub last reported. A nil stats pointer means the listener has not seen a
+// message queue response yet and is recorded as nothing at all, rather than as
+// a set of zeroes that would be indistinguishable from a genuinely idle scale
+// set.
+func RecordScaleSetGHStatistics(scaleSetName, provider string, stats *params.RunnerScaleSetStatistic) {
+	if stats == nil {
+		return
+	}
+	for gauge, value := range map[*prometheus.GaugeVec]int{
+		ScaleSetGHAvailableJobs:     stats.TotalAvailableJobs,
+		ScaleSetGHAcquiredJobs:      stats.TotalAcquiredJobs,
+		ScaleSetGHAssignedJobs:      stats.TotalAssignedJobs,
+		ScaleSetGHRunningJobs:       stats.TotalRunningJobs,
+		ScaleSetGHRegisteredRunners: stats.TotalRegisteredRunners,
+		ScaleSetGHBusyRunners:       stats.TotalBusyRunners,
+		ScaleSetGHIdleRunners:       stats.TotalIdleRunners,
+	} {
+		gauge.WithLabelValues(scaleSetName, provider).Set(float64(value))
+	}
+}

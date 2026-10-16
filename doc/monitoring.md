@@ -142,8 +142,17 @@ The `error_kind` label takes one of:
 | `garm_scaleset_min_idle_runners` | Gauge | `id` |
 | `garm_scaleset_desired_runner_count` | Gauge | `id` |
 | `garm_scaleset_bootstrap_timeout` | Gauge | `id` |
+| `garm_scaleset_gh_available_jobs` | Gauge | `scaleset_name`, `provider` |
+| `garm_scaleset_gh_acquired_jobs` | Gauge | `scaleset_name`, `provider` |
+| `garm_scaleset_gh_assigned_jobs` | Gauge | `scaleset_name`, `provider` |
+| `garm_scaleset_gh_running_jobs` | Gauge | `scaleset_name`, `provider` |
+| `garm_scaleset_gh_registered_runners` | Gauge | `scaleset_name`, `provider` |
+| `garm_scaleset_gh_busy_runners` | Gauge | `scaleset_name`, `provider` |
+| `garm_scaleset_gh_idle_runners` | Gauge | `scaleset_name`, `provider` |
 
 The `id` label is GARM's internal scale set ID; `scaleset_id` is the numeric ID assigned by GitHub. `garm_scaleset_desired_runner_count` reflects the runner count GitHub has requested for the scale set (unique to scale sets, since GitHub drives scheduling).
+
+The seven `gh_`-prefixed gauges are **GitHub's own accounting**, not GARM's: they are taken verbatim from the statistics GitHub attaches to every Actions message queue response, which the listener stores on the scale set as they arrive. They are snapshot metrics: each tick republishes whatever GitHub last reported for every scale set that still exists, so a deleted scale set stops reporting rather than pinning its final value. A scale set whose listener has not yet seen a message queue response reports no `gh_` series at all, which is deliberately distinguishable from one genuinely reporting zeroes. The prefix is there to keep them from being confused with GARM's own counts, such as `garm_scaleset_job_count` and `garm_scaleset_runner_count`, which can and do disagree with GitHub. `garm_scaleset_gh_available_jobs` is the metric to watch for queue depth: it is the number of jobs waiting on the forge side and, unlike anything derived from job messages, it is not capped by the runner capacity GARM advertises when it longpolls for messages. `garm_job_count{status="queued"}` and `garm_scaleset_job_count{status="queued"}` only count jobs GARM has been told about, so during saturation they understate the real backlog.
 
 Scale sets consume a long-poll message queue hosted by GitHub. The listener that services this queue exposes its own health metrics:
 

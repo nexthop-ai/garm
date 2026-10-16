@@ -118,6 +118,14 @@ func RegisterMetrics() error {
 		BuildInfo,
 		// job queue metrics
 		JobCount,
+		// scale set statistics, reported by GitHub on every message queue response
+		ScaleSetGHAvailableJobs,
+		ScaleSetGHAcquiredJobs,
+		ScaleSetGHAssignedJobs,
+		ScaleSetGHRunningJobs,
+		ScaleSetGHRegisteredRunners,
+		ScaleSetGHBusyRunners,
+		ScaleSetGHIdleRunners,
 	)
 
 	for _, c := range collectors {

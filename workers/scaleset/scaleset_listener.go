@@ -165,7 +165,8 @@ func (l *scaleSetListener) handleSessionMessage(msg params.RunnerScaleSetMessage
 	// and they are GitHub's own accounting: TotalAvailableJobs is the real
 	// queue depth, not capped by the capacity we advertise when long
 	// polling. Persist them before the type filter and the early returns
-	// below so the scale set always carries GitHub's latest view.
+	// below so the scale set always carries GitHub's latest view. The
+	// metrics collector reads them back to populate garm_scaleset_gh_*.
 	if msg.Statistics != nil {
 		if err := l.scaleSetHelper.SetRunnerStatistics(*msg.Statistics); err != nil {
 			slog.ErrorContext(l.ctx, "setting runner statistics", "error", err)
