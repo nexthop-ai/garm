@@ -48,6 +48,7 @@ type WorkflowJob struct {
 		HTMLURL     string    `json:"html_url"`
 		Status      string    `json:"status"`
 		Conclusion  string    `json:"conclusion"`
+		CreatedAt   time.Time `json:"created_at"`
 		StartedAt   time.Time `json:"started_at"`
 		CompletedAt time.Time `json:"completed_at"`
 		Name        string    `json:"name"`
@@ -563,6 +564,7 @@ func (s ScaleSetJobMessage) ToJob() Job {
 		Conclusion:      s.Result,
 		CompletedAt:     s.FinishTime,
 		StartedAt:       s.RunnerAssignTime,
+		CreatedAt:       s.QueueTime,
 		Name:            s.JobDisplayName,
 		GithubRunnerID:  s.RunnerID,
 		RunnerName:      s.RunnerName,
