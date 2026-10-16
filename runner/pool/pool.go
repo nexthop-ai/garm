@@ -70,11 +70,6 @@ const (
 	// nolint:golangci-lint,godox
 	// TODO: make this configurable(?)
 	maxCreateAttempts = 5
-
-	// Actions sent by the forge on workflow_job webhooks.
-	jobActionQueued     = "queued"
-	jobActionInProgress = "in_progress"
-	jobActionCompleted  = "completed"
 )
 
 func NewEntityPoolManager(ctx context.Context, entity params.ForgeEntity, instanceTokenGetter auth.InstanceTokenGetter, providers map[string]common.Provider, store dbCommon.Store) (common.PoolManager, error) {
@@ -257,30 +252,6 @@ func (r *basePoolManager) shouldRecordJob(ctx context.Context, jobParams params.
 
 	// New non-queued job with no runner - don't record
 	return false
-}
-
-// jobQueueDurationObserved reports whether we already observed a queue duration
-// for this job. Webhook delivery is at-least-once and persistJobToDB only
-// rejects backward transitions, so a redelivered in_progress hook would
-// otherwise be counted twice in the histogram.
-//
-// This can only dedup jobs we persist. Jobs shouldRecordJob rejects (notably
-// GitHub hosted runners, whose labels match no pool of ours) never reach the
-// database, so a redelivery of one of those is still double counted. That is
-// the accepted trade-off for measuring them at all.
-func (r *basePoolManager) jobQueueDurationObserved(ctx context.Context, workflowJobID int64) bool {
-	existingJob, err := r.store.GetJobByID(ctx, workflowJobID)
-	if err != nil {
-		// Not found means this is the first hook we record for the job. Any
-		// other error leaves us guessing; observing is the lesser evil.
-		if !errors.Is(err, runnerErrors.ErrNotFound) {
-			slog.With(slog.Any("error", err)).ErrorContext(
-				ctx, "failed to look up job for queue duration dedup",
-				"job_id", workflowJobID)
-		}
-		return false
-	}
-	return existingJob.Action == jobActionInProgress || existingJob.Action == jobActionCompleted
 }
 
 // persistJobToDB validates the job state transition and saves or updates the job
@@ -508,7 +479,7 @@ func (r *basePoolManager) HandleWorkflowJob(job params.WorkflowJob) error {
 	// job. A scale set runner means the job is handled by the scale set
 	// listener, not by webhooks. A pool runner attributes the job to its
 	// pool, which is the first moment we know which pool serviced it.
-	if job.Action == jobActionInProgress || job.Action == jobActionCompleted {
+	if job.Action == "in_progress" || job.Action == "completed" {
 		if jobParams.RunnerName != "" {
 			instance, err := r.store.GetInstance(ctx, jobParams.RunnerName)
 			if err == nil && instance.ScaleSetID != 0 {
@@ -537,20 +508,6 @@ func (r *basePoolManager) HandleWorkflowJob(job params.WorkflowJob) error {
 		}
 	}
 
-	// The job reached a runner. Record the queue latency using the forge's own
-	// timestamps; webhooks can be delayed and our clock is not authoritative.
-	// Scale set jobs never get here (they returned above) and are accounted for
-	// by the scale set listener instead, so there is no double counting.
-	//
-	// This must stay ahead of persistJobToDB: shouldRecordJob rejects jobs that
-	// no pool of ours can serve (GitHub hosted runners, other pool managers'
-	// jobs), and those waits are still worth measuring.
-	if job.Action == jobActionInProgress && !r.jobQueueDurationObserved(ctx, jobParams.WorkflowJobID) {
-		metrics.ObserveJobForgeQueueDuration(
-			metrics.JobQueueSourceWebhook, job.WorkflowJob.Labels,
-			job.WorkflowJob.CreatedAt, job.WorkflowJob.StartedAt)
-	}
-
 	// Validate and persist job to database first, then act on it.
 	if err := r.persistJobToDB(ctx, jobParams); err != nil {
 		return err
@@ -560,14 +517,14 @@ func (r *basePoolManager) HandleWorkflowJob(job params.WorkflowJob) error {
 	var actionErr error
 
 	switch job.Action {
-	case jobActionQueued:
+	case "queued":
 		// Queued jobs are recorded and consumed by consumeQueuedJobs() on
 		// its next tick. With no job age backoff there is nothing to wait
 		// for, so wake the consumer now.
 		if r.controllerInfo.JobBackoff() == 0 {
 			wakeLoop(r.consumeJobsCh)
 		}
-	case jobActionInProgress:
+	case "in_progress":
 		triggeredBy, inProgressErr := r.handleInProgressJob(ctx, jobParams)
 		actionErr = inProgressErr
 		// Break lock on the queued job that originally triggered this runner.
@@ -578,7 +535,7 @@ func (r *basePoolManager) HandleWorkflowJob(job params.WorkflowJob) error {
 					"job_id", triggeredBy)
 			}
 		}
-	case jobActionCompleted:
+	case "completed":
 		actionErr = r.handleCompletedJob(ctx, jobParams)
 	}
 

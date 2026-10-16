@@ -18,9 +18,37 @@ import (
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 
 	"github.com/cloudbase/garm/params"
 )
+
+// collect gathers the current samples of a collector, keyed by the joined
+// label values of each series.
+func collect(t *testing.T, c prometheus.Collector) map[string]*dto.Metric {
+	t.Helper()
+
+	ch := make(chan prometheus.Metric, 64)
+	c.Collect(ch)
+	close(ch)
+
+	out := map[string]*dto.Metric{}
+	for m := range ch {
+		var pb dto.Metric
+		if err := m.Write(&pb); err != nil {
+			t.Fatalf("writing metric: %v", err)
+		}
+		key := ""
+		for _, lbl := range pb.GetLabel() {
+			if key != "" {
+				key += "|"
+			}
+			key += lbl.GetName() + "=" + lbl.GetValue()
+		}
+		out[key] = &pb
+	}
+	return out
+}
 
 func scaleSetStatsGauges() map[string]*prometheus.GaugeVec {
 	return map[string]*prometheus.GaugeVec{

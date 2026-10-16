@@ -123,8 +123,6 @@ func RegisterMetrics() error {
 		WatcherNotifyTimeoutsCount,
 		// build info
 		BuildInfo,
-		// job queue latency from forge timestamps, observed as jobs start
-		JobForgeQueueDuration,
 		// scale set statistics, reported by GitHub on every message queue response
 		ScaleSetGHAvailableJobs,
 		ScaleSetGHAcquiredJobs,
