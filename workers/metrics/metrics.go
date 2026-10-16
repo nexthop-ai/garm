@@ -319,15 +319,16 @@ func (w *Worker) handleJobEvent(op dbCommon.OperationType, job params.Job) {
 
 	switch job.Status {
 	case string(params.JobStatusInProgress):
+		runnerLabels := metrics.NormalizeRunnerLabels(job.Labels)
 		// StartedAt and CreatedAt make the queue time computable no matter
 		// when we first saw the job. Without StartedAt, the wall clock only
 		// works if we witnessed the job while it was still queued.
 		switch {
 		case !job.StartedAt.IsZero() && !job.CreatedAt.IsZero():
-			observeDuration(metrics.JobQueueDuration.WithLabelValues(job.RepositoryOwner),
+			observeDuration(metrics.JobQueueDuration.WithLabelValues(job.RepositoryOwner, runnerLabels),
 				job.StartedAt.Sub(job.CreatedAt))
 		case prevStatus == string(params.JobStatusQueued):
-			observeDuration(metrics.JobQueueDuration.WithLabelValues(job.RepositoryOwner),
+			observeDuration(metrics.JobQueueDuration.WithLabelValues(job.RepositoryOwner, runnerLabels),
 				time.Since(job.CreatedAt))
 		}
 	case string(params.JobStatusCompleted):
