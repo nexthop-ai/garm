@@ -189,7 +189,7 @@ func (s *JobsTestSuite) TestDeleteInactionableJobs_AllScenarios() {
 func (s *JobsTestSuite) TestDeleteInactionableJobs_WithDuration() {
 	db := s.Store.(*sqlDatabase)
 
-	// Create an inactionable job (completed, no instance) with recent created_at
+	// Create an inactionable job (completed, no instance) with recent updated_at
 	recentJob := params.Job{
 		WorkflowJobID:   30001,
 		RunID:           67890,
@@ -201,7 +201,7 @@ func (s *JobsTestSuite) TestDeleteInactionableJobs_WithDuration() {
 	_, err := s.Store.CreateOrUpdateJob(s.adminCtx, recentJob)
 	s.Require().NoError(err)
 
-	// Create an inactionable job and backdate its created_at to 2 hours ago
+	// Create an inactionable job and backdate its updated_at to 2 hours ago
 	oldJob := params.Job{
 		WorkflowJobID:   30002,
 		RunID:           67890,
@@ -213,10 +213,10 @@ func (s *JobsTestSuite) TestDeleteInactionableJobs_WithDuration() {
 	_, err = s.Store.CreateOrUpdateJob(s.adminCtx, oldJob)
 	s.Require().NoError(err)
 
-	// Backdate the old job's created_at
+	// Backdate the old job's last update
 	err = db.conn.Model(&WorkflowJob{}).
 		Where("workflow_job_id = ?", 30002).
-		Update("created_at", time.Now().Add(-2*time.Hour)).Error
+		UpdateColumn("updated_at", time.Now().Add(-2*time.Hour)).Error
 	s.Require().NoError(err)
 
 	var countBefore int64
@@ -238,4 +238,82 @@ func (s *JobsTestSuite) TestDeleteInactionableJobs_WithDuration() {
 	err = db.conn.Where("workflow_job_id = ?", 30001).First(&remaining).Error
 	s.Require().NoError(err)
 	s.Require().Equal("recent-completed", remaining.Name)
+}
+
+// TestDeleteInactionableJobs_GraceUsesUpdatedAt verifies that a job queued on
+// the forge long ago, but only just seen by GARM, still gets the grace period.
+func (s *JobsTestSuite) TestDeleteInactionableJobs_GraceUsesUpdatedAt() {
+	db := s.Store.(*sqlDatabase)
+
+	job := params.Job{
+		WorkflowJobID:   30101,
+		RunID:           67890,
+		Status:          string(params.JobStatusCompleted),
+		Name:            "long-queued-completed",
+		RepositoryName:  "test-repo",
+		RepositoryOwner: "test-owner",
+		CreatedAt:       time.Now().Add(-3 * time.Hour),
+	}
+	_, err := s.Store.CreateOrUpdateJob(s.adminCtx, job)
+	s.Require().NoError(err)
+
+	err = s.Store.DeleteInactionableJobs(s.adminCtx, 1*time.Hour)
+	s.Require().NoError(err)
+
+	var count int64
+	err = db.conn.Model(&WorkflowJob{}).Where("workflow_job_id = ?", 30101).Count(&count).Error
+	s.Require().NoError(err)
+	s.Require().Equal(int64(1), count, "a recently written job must survive regardless of its created_at")
+}
+
+// TestCreateOrUpdateJob_CreatedAt verifies that the forge supplied CreatedAt is
+// stored on insert, that a missing one falls back to the insert time, and that
+// later updates never move it.
+func (s *JobsTestSuite) TestCreateOrUpdateJob_CreatedAt() {
+	queuedAt := time.Date(2026, 7, 29, 10, 0, 0, 0, time.UTC)
+
+	created, err := s.Store.CreateOrUpdateJob(s.adminCtx, params.Job{
+		WorkflowJobID:   30201,
+		RunID:           67890,
+		Action:          "queued",
+		Status:          string(params.JobStatusQueued),
+		Name:            "forge-created-at",
+		RepositoryName:  "test-repo",
+		RepositoryOwner: "test-owner",
+		CreatedAt:       queuedAt,
+	})
+	s.Require().NoError(err)
+	s.Require().True(created.CreatedAt.Equal(queuedAt), "CreatedAt = %v, want %v", created.CreatedAt, queuedAt)
+
+	updated, err := s.Store.CreateOrUpdateJob(s.adminCtx, params.Job{
+		WorkflowJobID:   30201,
+		RunID:           67890,
+		Action:          "in_progress",
+		Status:          string(params.JobStatusInProgress),
+		Name:            "forge-created-at",
+		RepositoryName:  "test-repo",
+		RepositoryOwner: "test-owner",
+		CreatedAt:       queuedAt.Add(time.Hour),
+		StartedAt:       queuedAt.Add(5 * time.Minute),
+	})
+	s.Require().NoError(err)
+	s.Require().True(updated.CreatedAt.Equal(queuedAt), "update moved CreatedAt to %v", updated.CreatedAt)
+
+	fetched, err := s.Store.GetJobByID(s.adminCtx, 30201)
+	s.Require().NoError(err)
+	s.Require().True(fetched.CreatedAt.Equal(queuedAt), "stored CreatedAt = %v, want %v", fetched.CreatedAt, queuedAt)
+
+	before := time.Now()
+	noForgeTime, err := s.Store.CreateOrUpdateJob(s.adminCtx, params.Job{
+		WorkflowJobID:   30202,
+		RunID:           67890,
+		Action:          "queued",
+		Status:          string(params.JobStatusQueued),
+		Name:            "no-forge-created-at",
+		RepositoryName:  "test-repo",
+		RepositoryOwner: "test-owner",
+	})
+	s.Require().NoError(err)
+	s.Require().False(noForgeTime.CreatedAt.IsZero())
+	s.Require().False(noForgeTime.CreatedAt.Before(before.Add(-time.Second)), "CreatedAt = %v, want insert time", noForgeTime.CreatedAt)
 }

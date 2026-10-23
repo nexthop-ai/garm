@@ -106,6 +106,9 @@ func (s *sqlDatabase) paramsJobToWorkflowJob(ctx context.Context, conn *gorm.DB,
 		ForgeInstanceID: job.ForgeInstanceID,
 		Labels:          asJSON,
 		LockedBy:        job.LockedBy,
+		// The forge's queue time, so queue durations measure the real wait.
+		// When the forge did not report one, gorm stamps the insert time.
+		CreatedAt: job.CreatedAt,
 	}
 
 	if job.ScaleSetID != 0 {
@@ -524,8 +527,11 @@ func (s *sqlDatabase) DeleteInactionableJobs(_ context.Context, olderThan time.D
 			Model(&WorkflowJob{}).
 			Preload("Instance").
 			Where("(status != ? AND instance_id IS NULL) OR (status = ? AND instance_id IS NOT NULL)", params.JobStatusQueued, params.JobStatusCompleted)
+		// created_at is the forge's queue time, which can be arbitrarily old by
+		// the time GARM first sees a job, so the grace period counts from
+		// GARM's last write instead.
 		if olderThan > 0 {
-			q = q.Where("created_at < ?", time.Now().Add(-olderThan))
+			q = q.Where("updated_at < ?", time.Now().Add(-olderThan))
 		}
 		if err := q.Find(&jobs).Error; err != nil {
 			return fmt.Errorf("fetching inactionable jobs: %w", err)

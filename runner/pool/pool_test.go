@@ -27,6 +27,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
+	runnerErrors "github.com/cloudbase/garm-provider-common/errors"
 	commonParams "github.com/cloudbase/garm-provider-common/params"
 	"github.com/cloudbase/garm/cache"
 	"github.com/cloudbase/garm/database"
@@ -789,6 +790,90 @@ func (s *PoolStressTestSuite) TestPersistJobToDB_AllowsForwardTransitions() {
 			s.Require().NoError(err, "expected transition %s->%s to pass validation", tt.seedAction, tt.nextAction)
 		})
 	}
+}
+
+// TestHandleWorkflowJobStoresForgeCreatedAt verifies that a job's CreatedAt is
+// the forge's created_at from the webhook rather than the time GARM stored it.
+func (s *PoolStressTestSuite) TestHandleWorkflowJobStoresForgeCreatedAt() {
+	labels := []string{"self-hosted", "linux", "x64"}
+	createdAt := time.Date(2026, 7, 29, 10, 0, 0, 0, time.UTC)
+
+	queuedJob := s.makeWorkflowJob(2201, "queued", "queued", "", labels)
+	queuedJob.WorkflowJob.CreatedAt = createdAt
+
+	jobParams, err := s.mgr.paramsWorkflowJobToParamsJob(queuedJob)
+	s.Require().NoError(err)
+	s.True(jobParams.CreatedAt.Equal(createdAt), "CreatedAt = %v, want %v", jobParams.CreatedAt, createdAt)
+
+	s.Require().NoError(s.mgr.HandleWorkflowJob(queuedJob))
+
+	stored, err := s.store.GetJobByID(s.adminCtx, 2201)
+	s.Require().NoError(err)
+	s.True(stored.CreatedAt.Equal(createdAt), "stored CreatedAt = %v, want %v", stored.CreatedAt, createdAt)
+}
+
+// scaleDownWithQueuedJob records a queued job with the given forge queue
+// time, locks and unlocks it the way consumeQueuedJobs does, scales the pool
+// down, and returns the job lookup error afterwards.
+func (s *PoolStressTestSuite) scaleDownWithQueuedJob(jobID int64, forgeCreatedAt time.Time) error {
+	// scaleDownOnePool locks the instances it removes. The locker is process
+	// global, so another test in this binary may already have registered one.
+	locker, err := locking.NewLocalLocker(s.adminCtx, s.store)
+	s.Require().NoError(err)
+	if err := locking.RegisterLocker(locker); err != nil {
+		s.Require().ErrorContains(err, "already registered")
+	}
+
+	labels := []string{"self-hosted", "linux", "x64"}
+
+	for i := 0; i < 2; i++ {
+		_, err := s.store.CreateInstance(s.adminCtx, s.pool.ID, params.CreateInstanceParams{
+			Name:         fmt.Sprintf("idle-runner-%d-%d", jobID, i),
+			OSType:       "linux",
+			OSArch:       "amd64",
+			Status:       commonParams.InstanceRunning,
+			RunnerStatus: params.RunnerIdle,
+		})
+		s.Require().NoError(err)
+	}
+
+	queuedJob := s.makeWorkflowJob(jobID, "queued", "queued", "", labels)
+	queuedJob.WorkflowJob.CreatedAt = forgeCreatedAt
+	s.Require().NoError(s.mgr.HandleWorkflowJob(queuedJob))
+
+	// Lock writes refresh updated_at, so it stays recent for a stuck job.
+	s.Require().NoError(s.store.LockJob(s.adminCtx, jobID, s.mgr.entity.ID))
+	s.Require().NoError(s.store.UnlockJob(s.adminCtx, jobID, s.mgr.entity.ID))
+
+	s.Require().NoError(s.mgr.scaleDownOnePool(s.adminCtx, s.pool))
+
+	instances, err := s.store.ListPoolInstances(s.adminCtx, s.pool.ID, false)
+	s.Require().NoError(err)
+	pendingDelete := 0
+	for _, inst := range instances {
+		if inst.Status == commonParams.InstancePendingDelete {
+			pendingDelete++
+		}
+	}
+	s.Require().Positive(pendingDelete, "the pool must have scaled down for the cleanup to run")
+
+	_, err = s.store.GetJobByID(s.adminCtx, jobID)
+	return err
+}
+
+// TestScaleDownDeletesOldForgeQueuedJob verifies that the cleanup after a
+// scale-down deletes a queued job the forge queued long ago, even when lock
+// bookkeeping has refreshed its updated_at.
+func (s *PoolStressTestSuite) TestScaleDownDeletesOldForgeQueuedJob() {
+	err := s.scaleDownWithQueuedJob(2301, time.Now().Add(-time.Hour))
+	s.Require().ErrorIs(err, runnerErrors.ErrNotFound, "an old queued job must be deleted after a scale-down")
+}
+
+// TestScaleDownKeepsRecentForgeQueuedJob verifies that the cleanup after a
+// scale-down keeps a queued job the forge queued only recently.
+func (s *PoolStressTestSuite) TestScaleDownKeepsRecentForgeQueuedJob() {
+	err := s.scaleDownWithQueuedJob(2302, time.Now().Add(-time.Minute))
+	s.Require().NoError(err, "a recently queued job must survive the cleanup")
 }
 
 func mustParseUUID(s string) uuid.UUID {
