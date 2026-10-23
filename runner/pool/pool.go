@@ -1413,9 +1413,11 @@ func (r *basePoolManager) scaleDownOnePool(ctx context.Context, pool params.Pool
 		}
 
 		for _, job := range queued {
-			// CreatedAt is the forge's queue time, which may already be old when
-			// GARM first records the job, so age it from GARM's last write.
-			if time.Since(job.UpdatedAt).Minutes() > 10 && pool.HasRequiredLabels(job.Labels) {
+			// A job still queued on the forge would have been assigned to one of the
+			// idle runners just removed. The margin covers a freshly queued job the
+			// forge has not assigned yet, which the forge's queue time (CreatedAt)
+			// measures. Lock bookkeeping keeps refreshing UpdatedAt, so it can't be used.
+			if time.Since(job.CreatedAt).Minutes() > 10 && pool.HasRequiredLabels(job.Labels) {
 				if err := r.store.DeleteJob(ctx, job.WorkflowJobID); err != nil && !errors.Is(err, runnerErrors.ErrNotFound) {
 					slog.With(slog.Any("error", err)).ErrorContext(
 						ctx, "failed to delete job",
