@@ -27,6 +27,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
+	runnerErrors "github.com/cloudbase/garm-provider-common/errors"
 	commonParams "github.com/cloudbase/garm-provider-common/params"
 	"github.com/cloudbase/garm/cache"
 	"github.com/cloudbase/garm/database"
@@ -811,10 +812,10 @@ func (s *PoolStressTestSuite) TestHandleWorkflowJobStoresForgeCreatedAt() {
 	s.True(stored.CreatedAt.Equal(createdAt), "stored CreatedAt = %v, want %v", stored.CreatedAt, createdAt)
 }
 
-// TestScaleDownKeepsLongForgeQueuedJob verifies that the stale queued job
-// cleanup after a scale-down does not delete a job GARM only just recorded,
-// even though it was queued on the forge long ago.
-func (s *PoolStressTestSuite) TestScaleDownKeepsLongForgeQueuedJob() {
+// scaleDownWithQueuedJob records a queued job with the given forge queue
+// time, locks and unlocks it the way consumeQueuedJobs does, scales the pool
+// down, and returns the job lookup error afterwards.
+func (s *PoolStressTestSuite) scaleDownWithQueuedJob(jobID int64, forgeCreatedAt time.Time) error {
 	// scaleDownOnePool locks the instances it removes. The locker is process
 	// global, so another test in this binary may already have registered one.
 	locker, err := locking.NewLocalLocker(s.adminCtx, s.store)
@@ -827,7 +828,7 @@ func (s *PoolStressTestSuite) TestScaleDownKeepsLongForgeQueuedJob() {
 
 	for i := 0; i < 2; i++ {
 		_, err := s.store.CreateInstance(s.adminCtx, s.pool.ID, params.CreateInstanceParams{
-			Name:         fmt.Sprintf("idle-runner-%d", i),
+			Name:         fmt.Sprintf("idle-runner-%d-%d", jobID, i),
 			OSType:       "linux",
 			OSArch:       "amd64",
 			Status:       commonParams.InstanceRunning,
@@ -836,9 +837,13 @@ func (s *PoolStressTestSuite) TestScaleDownKeepsLongForgeQueuedJob() {
 		s.Require().NoError(err)
 	}
 
-	queuedJob := s.makeWorkflowJob(2301, "queued", "queued", "", labels)
-	queuedJob.WorkflowJob.CreatedAt = time.Now().Add(-time.Hour)
+	queuedJob := s.makeWorkflowJob(jobID, "queued", "queued", "", labels)
+	queuedJob.WorkflowJob.CreatedAt = forgeCreatedAt
 	s.Require().NoError(s.mgr.HandleWorkflowJob(queuedJob))
+
+	// Lock writes refresh updated_at, so it stays recent for a stuck job.
+	s.Require().NoError(s.store.LockJob(s.adminCtx, jobID, s.mgr.entity.ID))
+	s.Require().NoError(s.store.UnlockJob(s.adminCtx, jobID, s.mgr.entity.ID))
 
 	s.Require().NoError(s.mgr.scaleDownOnePool(s.adminCtx, s.pool))
 
@@ -852,9 +857,23 @@ func (s *PoolStressTestSuite) TestScaleDownKeepsLongForgeQueuedJob() {
 	}
 	s.Require().Positive(pendingDelete, "the pool must have scaled down for the cleanup to run")
 
-	job, err := s.store.GetJobByID(s.adminCtx, 2301)
-	s.Require().NoError(err, "a recently recorded queued job must survive the cleanup")
-	s.Equal(string(params.JobStatusQueued), job.Status)
+	_, err = s.store.GetJobByID(s.adminCtx, jobID)
+	return err
+}
+
+// TestScaleDownDeletesOldForgeQueuedJob verifies that the cleanup after a
+// scale-down deletes a queued job the forge queued long ago, even when lock
+// bookkeeping has refreshed its updated_at.
+func (s *PoolStressTestSuite) TestScaleDownDeletesOldForgeQueuedJob() {
+	err := s.scaleDownWithQueuedJob(2301, time.Now().Add(-time.Hour))
+	s.Require().ErrorIs(err, runnerErrors.ErrNotFound, "an old queued job must be deleted after a scale-down")
+}
+
+// TestScaleDownKeepsRecentForgeQueuedJob verifies that the cleanup after a
+// scale-down keeps a queued job the forge queued only recently.
+func (s *PoolStressTestSuite) TestScaleDownKeepsRecentForgeQueuedJob() {
+	err := s.scaleDownWithQueuedJob(2302, time.Now().Add(-time.Minute))
+	s.Require().NoError(err, "a recently queued job must survive the cleanup")
 }
 
 func mustParseUUID(s string) uuid.UUID {
