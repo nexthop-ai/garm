@@ -92,7 +92,7 @@ var (
 	// JobQueueDuration measures the time jobs spend queued before a runner
 	// picks them up. This is the primary end-user SLO for a CI platform.
 	// requested_labels tells apart which runner type is starved; see
-	// NormalizeRequestedLabels for its cardinality caveat.
+	// NormalizeRequestedLabels for what bounds its cardinality.
 	JobQueueDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Namespace: metricsNamespace,
 		Subsystem: metricsJobsSubsystem,
