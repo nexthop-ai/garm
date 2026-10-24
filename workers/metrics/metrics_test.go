@@ -27,7 +27,7 @@ import (
 )
 
 // queueDurationSamples returns the sample count of every
-// garm_job_queue_duration_seconds series, keyed by "owner|runner_labels".
+// garm_job_queue_duration_seconds series, keyed by "owner|requested_labels".
 func queueDurationSamples(t *testing.T) map[string]uint64 {
 	t.Helper()
 
@@ -47,7 +47,7 @@ func queueDurationSamples(t *testing.T) map[string]uint64 {
 			for _, lbl := range m.GetLabel() {
 				labels[lbl.GetName()] = lbl.GetValue()
 			}
-			out[labels["owner"]+"|"+labels["runner_labels"]] = m.GetHistogram().GetSampleCount()
+			out[labels["owner"]+"|"+labels["requested_labels"]] = m.GetHistogram().GetSampleCount()
 		}
 	}
 	return out

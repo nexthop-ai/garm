@@ -219,13 +219,13 @@ A spike in `bootstrap_timeout` typically means a broken image, network or userda
 | Metric | Type | Labels |
 | -------- | ------ | -------- |
 | `garm_job_status` | Gauge | `job_id`, `workflow_job_id`, `scaleset_job_id`, `workflow_run_id`, `name`, `status`, `conclusion`, `runner_name`, `owner`, `repository`, `requested_labels` |
-| `garm_job_queue_duration_seconds` | Histogram | `owner`, `runner_labels` |
+| `garm_job_queue_duration_seconds` | Histogram | `owner`, `requested_labels` |
 | `garm_job_execution_duration_seconds` | Histogram | `owner` |
 | `garm_job_completed_total` | Counter | `owner`, `repository`, `conclusion` |
 
-`garm_job_queue_duration_seconds` measures how long jobs wait between being queued and starting to run — the primary end-user SLO for a CI platform. `garm_job_execution_duration_seconds` measures how long jobs run once started, which is what capacity planning is based on. Both are labeled by `owner` rather than by repository, to keep histogram cardinality bounded on controllers managing many repositories. The queue duration is additionally labeled by `runner_labels`, so a starved runner type stands out instead of being averaged away across the owner. The wait is measured from the time the forge queued the job, not from when GARM first saw it.
+`garm_job_queue_duration_seconds` measures how long jobs wait between being queued and starting to run — the primary end-user SLO for a CI platform. `garm_job_execution_duration_seconds` measures how long jobs run once started, which is what capacity planning is based on. Both are labeled by `owner` rather than by repository, to keep histogram cardinality bounded on controllers managing many repositories. The queue duration is additionally labeled by `requested_labels`, so a starved runner type stands out instead of being averaged away across the owner. The wait is measured from the time the forge queued the job, not from when GARM first saw it.
 
-`runner_labels` is the job's requested label set, lowercased (GitHub matches runner labels case-insensitively), sorted and comma joined, so that case and ordering variants collapse into one series. Cardinality warning: it is derived from the workflow's `runs-on`, which workflow authors control. Every novel label set mints a new series, so keep `runs-on` values to a bounded, agreed set and never put per-job or per-run values there.
+Here `requested_labels` is normalized: the job's requested labels are trimmed, lowercased (GitHub matches runner labels case-insensitively), sorted, deduplicated and comma joined, so that case and ordering variants of one label set across workflows share a series. This differs from `garm_job_status`, whose `requested_labels` is the raw, space-joined list exactly as the forge sent it. Cardinality warning: it is derived from the workflow's `runs-on`, which workflow authors control. Every novel label set mints a new series, so keep `runs-on` values to a bounded, agreed set and never put per-job or per-run values there.
 
 `garm_job_completed_total` counts finished jobs by `conclusion` (`success`, `failure`, `cancelled`, `timed_out`, ...). Unlike the `garm_job_status` snapshot gauge — which forgets jobs once they are pruned from the database — this counter is a reliable long-term throughput measure ("how many jobs did this controller run last month").
 
