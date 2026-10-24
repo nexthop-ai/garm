@@ -78,9 +78,9 @@ var JobCount = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 // case-insensitively and "Linux" must not split a series from "linux", and
 // sorted so that permutations of the same label set collapse into one series.
 //
-// Cardinality: the labels come from the workflow's runs-on, which workflow
-// authors control, so every novel label set mints a new series. Keep runs-on
-// values to a bounded, agreed set; do not put per-job or per-run values there.
+// Cardinality: GARM only records jobs whose labels match a pool's tags or that
+// ran on its pool runners, so every value is a subset of the labels operators
+// configure on pools (plus GARM's controller and pool ID runner labels).
 func NormalizeRequestedLabels(requestedLabels []string) string {
 	if len(requestedLabels) == 0 {
 		return ""
