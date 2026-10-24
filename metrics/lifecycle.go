@@ -91,13 +91,15 @@ var (
 
 	// JobQueueDuration measures the time jobs spend queued before a runner
 	// picks them up. This is the primary end-user SLO for a CI platform.
+	// requested_labels tells apart which runner type is starved; see
+	// NormalizeRequestedLabels for what bounds its cardinality.
 	JobQueueDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Namespace: metricsNamespace,
 		Subsystem: metricsJobsSubsystem,
 		Name:      "queue_duration_seconds",
 		Help:      "Time a workflow job spent queued before it started running",
 		Buckets:   jobQueueBuckets,
-	}, []string{"owner"})
+	}, []string{"owner", "requested_labels"})
 
 	// JobExecutionDuration measures how long jobs run once started.
 	JobExecutionDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
