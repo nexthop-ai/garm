@@ -50,7 +50,7 @@ var JobCount = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 	Help:      "Count of jobs by status and entity",
 }, []string{"status", "entity_type", "entity_name"})
 
-// NormalizeRunnerLabels renders a job's requested labels as a single, stable
+// NormalizeRequestedLabels renders a job's requested labels as a single, stable
 // label value. The labels are lowercased, since GitHub matches runner labels
 // case-insensitively and "Linux" must not split a series from "linux", and
 // sorted so that permutations of the same label set collapse into one series.
@@ -58,12 +58,12 @@ var JobCount = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 // Cardinality: the labels come from the workflow's runs-on, which workflow
 // authors control, so every novel label set mints a new series. Keep runs-on
 // values to a bounded, agreed set; do not put per-job or per-run values there.
-func NormalizeRunnerLabels(runnerLabels []string) string {
-	if len(runnerLabels) == 0 {
+func NormalizeRequestedLabels(requestedLabels []string) string {
+	if len(requestedLabels) == 0 {
 		return ""
 	}
-	sorted := make([]string, 0, len(runnerLabels))
-	for _, lbl := range runnerLabels {
+	sorted := make([]string, 0, len(requestedLabels))
+	for _, lbl := range requestedLabels {
 		if lbl = strings.ToLower(strings.TrimSpace(lbl)); lbl != "" {
 			sorted = append(sorted, lbl)
 		}
