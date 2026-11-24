@@ -58,3 +58,14 @@ var ScaleSetJobStatus = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 	"repository",
 	"requested_labels",
 })
+
+// JobCount is a low-cardinality aggregate that counts jobs by status and by
+// the entity they belong to. job_type tells webhook jobs (handled by pools)
+// from scale set jobs. Unlike JobStatus and ScaleSetJobStatus it carries no
+// per-job labels, so its series do not churn as jobs come and go.
+var JobCount = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	Namespace: metricsNamespace,
+	Subsystem: metricsJobsSubsystem,
+	Name:      "count",
+	Help:      "Count of jobs by status and entity",
+}, []string{"job_type", "status", "entity_type", "entity_name"})

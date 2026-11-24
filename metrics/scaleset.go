@@ -60,4 +60,23 @@ var (
 		Name:      "bootstrap_timeout",
 		Help:      "Runner bootstrap timeout in the scale set",
 	}, []string{"id"})
+
+	// ScaleSetRunnerCount counts runner instances per scale set, by instance
+	// status and runner status. It tracks per scale set capacity and
+	// utilization without a series per runner.
+	ScaleSetRunnerCount = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: metricsNamespace,
+		Subsystem: metricsScaleSetSubsystem,
+		Name:      "runner_count",
+		Help:      "Count of runner instances per scale set by status",
+	}, []string{"id", "scaleset_name", "status", "runner_status", "provider"})
+
+	// ScaleSetJobCount counts jobs per scale set by status: the queue depth
+	// to watch when deciding whether to raise max_runners.
+	ScaleSetJobCount = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: metricsNamespace,
+		Subsystem: metricsScaleSetSubsystem,
+		Name:      "job_count",
+		Help:      "Count of jobs per scale set by status",
+	}, []string{"id", "scaleset_name", "status"})
 )

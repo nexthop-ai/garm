@@ -27,6 +27,26 @@ type parentInfo struct {
 	OwnerName    string
 	Type         string
 	ProviderName string
+	// ScaleSetName is set for scale sets only.
+	ScaleSetName string
+}
+
+// instanceCountKey and scaleSetRunnerCountKey are the label sets of the
+// aggregate runner gauges.
+type instanceCountKey struct {
+	Status       string
+	RunnerStatus string
+	OwnerName    string
+	Type         string
+	ProviderName string
+}
+
+type scaleSetRunnerCountKey struct {
+	ScaleSetID   string
+	ScaleSetName string
+	Status       string
+	RunnerStatus string
+	ProviderName string
 }
 
 // CollectInstanceMetric collects the metrics for the runner instances
@@ -34,6 +54,8 @@ type parentInfo struct {
 func CollectInstanceMetric(ctx context.Context, r *runner.Runner) error {
 	// reset metrics
 	metrics.InstanceStatus.Reset()
+	metrics.InstanceCount.Reset()
+	metrics.ScaleSetRunnerCount.Reset()
 
 	instances, err := r.ListAllInstances(ctx)
 	if err != nil {
@@ -77,6 +99,7 @@ func CollectInstanceMetric(ctx context.Context, r *runner.Runner) error {
 		info := parentInfo{
 			Type:         string(scaleSet.ScaleSetType()),
 			ProviderName: scaleSet.ProviderName,
+			ScaleSetName: scaleSet.Name,
 		}
 		switch {
 		case scaleSet.OrgName != "":
@@ -89,6 +112,8 @@ func CollectInstanceMetric(ctx context.Context, r *runner.Runner) error {
 		scaleSetParents[scaleSet.ID] = info
 	}
 
+	counts := make(map[instanceCountKey]int)
+	scaleSetCounts := make(map[scaleSetRunnerCountKey]int)
 	for _, instance := range instances {
 		var (
 			parent     parentInfo
@@ -113,6 +138,42 @@ func CollectInstanceMetric(ctx context.Context, r *runner.Runner) error {
 			scaleSetID,                    // label: scaleset_id
 			parent.ProviderName,           // label: provider
 		).Set(1)
+
+		counts[instanceCountKey{
+			Status:       string(instance.Status),
+			RunnerStatus: string(instance.RunnerStatus),
+			OwnerName:    parent.OwnerName,
+			Type:         parent.Type,
+			ProviderName: parent.ProviderName,
+		}]++
+		if instance.ScaleSetID != 0 {
+			scaleSetCounts[scaleSetRunnerCountKey{
+				ScaleSetID:   scaleSetID,
+				ScaleSetName: parent.ScaleSetName,
+				Status:       string(instance.Status),
+				RunnerStatus: string(instance.RunnerStatus),
+				ProviderName: parent.ProviderName,
+			}]++
+		}
+	}
+
+	for key, count := range counts {
+		metrics.InstanceCount.WithLabelValues(
+			key.Status,       // label: status
+			key.RunnerStatus, // label: runner_status
+			key.OwnerName,    // label: pool_owner
+			key.Type,         // label: pool_type
+			key.ProviderName, // label: provider
+		).Set(float64(count))
+	}
+	for key, count := range scaleSetCounts {
+		metrics.ScaleSetRunnerCount.WithLabelValues(
+			key.ScaleSetID,   // label: id
+			key.ScaleSetName, // label: scaleset_name
+			key.Status,       // label: status
+			key.RunnerStatus, // label: runner_status
+			key.ProviderName, // label: provider
+		).Set(float64(count))
 	}
 	return nil
 }

@@ -19,9 +19,50 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/cloudbase/garm/metrics"
+	"github.com/cloudbase/garm/params"
 	"github.com/cloudbase/garm/runner"
 )
+
+// The two kinds of job share the JobCount gauge, told apart by job_type.
+// Each collector replaces only the series of its own kind.
+const (
+	jobTypeWebhook  = "webhook"
+	jobTypeScaleSet = "scaleset"
+)
+
+type jobCountKey struct {
+	Status     string
+	EntityType string
+	EntityName string
+}
+
+func setJobCounts(jobType string, counts map[jobCountKey]int) {
+	metrics.JobCount.DeletePartialMatch(prometheus.Labels{"job_type": jobType})
+	for key, count := range counts {
+		metrics.JobCount.WithLabelValues(
+			jobType,        // label: job_type
+			key.Status,     // label: status
+			key.EntityType, // label: entity_type
+			key.EntityName, // label: entity_name
+		).Set(float64(count))
+	}
+}
+
+// scaleSetOwner returns the type and name of the entity a scale set belongs to.
+func scaleSetOwner(scaleSet params.ScaleSet) (entityType, entityName string) {
+	switch {
+	case scaleSet.OrgName != "":
+		return string(params.ForgeEntityTypeOrganization), scaleSet.OrgName
+	case scaleSet.EnterpriseName != "":
+		return string(params.ForgeEntityTypeEnterprise), scaleSet.EnterpriseName
+	case scaleSet.RepoName != "":
+		return string(params.ForgeEntityTypeRepository), scaleSet.RepoName
+	}
+	return "unknown", "unknown"
+}
 
 // CollectJobMetric collects the metrics for the jobs recorded by GARM
 func CollectJobMetric(ctx context.Context, r *runner.Runner) error {
@@ -33,7 +74,22 @@ func CollectJobMetric(ctx context.Context, r *runner.Runner) error {
 		return err
 	}
 
+	counts := make(map[jobCountKey]int)
 	for _, job := range jobs {
+		key := jobCountKey{Status: job.Status, EntityType: "unknown", EntityName: "unknown"}
+		switch {
+		case job.OrgID != nil:
+			key.EntityType = string(params.ForgeEntityTypeOrganization)
+			key.EntityName = job.RepositoryOwner
+		case job.RepoID != nil:
+			key.EntityType = string(params.ForgeEntityTypeRepository)
+			key.EntityName = job.RepositoryOwner + "/" + job.RepositoryName
+		case job.EnterpriseID != nil:
+			key.EntityType = string(params.ForgeEntityTypeEnterprise)
+			key.EntityName = job.RepositoryOwner
+		}
+		counts[key]++
+
 		poolID := ""
 		if job.PoolID != nil {
 			poolID = job.PoolID.String()
@@ -52,6 +108,7 @@ func CollectJobMetric(ctx context.Context, r *runner.Runner) error {
 			poolID,                               // label: pool_id
 		).Set(1)
 	}
+	setJobCounts(jobTypeWebhook, counts)
 	return nil
 }
 
@@ -59,10 +116,43 @@ func CollectJobMetric(ctx context.Context, r *runner.Runner) error {
 // scale sets.
 func CollectScaleSetJobMetric(ctx context.Context, r *runner.Runner) error {
 	metrics.ScaleSetJobStatus.Reset()
+	metrics.ScaleSetJobCount.Reset()
 
 	jobs, err := r.ListAllScaleSetJobs(ctx)
 	if err != nil {
 		return err
+	}
+
+	scaleSets, err := r.ListAllScaleSets(ctx)
+	if err != nil {
+		return err
+	}
+	scaleSetsByID := make(map[uint]params.ScaleSet, len(scaleSets))
+	for _, scaleSet := range scaleSets {
+		scaleSetsByID[scaleSet.ID] = scaleSet
+	}
+
+	type scaleSetJobCountKey struct {
+		ScaleSetID uint
+		Status     string
+	}
+	counts := make(map[jobCountKey]int)
+	scaleSetCounts := make(map[scaleSetJobCountKey]int)
+	for _, job := range jobs {
+		key := jobCountKey{Status: job.Status, EntityType: "unknown", EntityName: "unknown"}
+		if scaleSet, ok := scaleSetsByID[job.ScaleSetID]; ok {
+			key.EntityType, key.EntityName = scaleSetOwner(scaleSet)
+			scaleSetCounts[scaleSetJobCountKey{ScaleSetID: job.ScaleSetID, Status: job.Status}]++
+		}
+		counts[key]++
+	}
+	setJobCounts(jobTypeScaleSet, counts)
+	for key, count := range scaleSetCounts {
+		metrics.ScaleSetJobCount.WithLabelValues(
+			fmt.Sprintf("%d", key.ScaleSetID),  // label: id
+			scaleSetsByID[key.ScaleSetID].Name, // label: scaleset_name
+			key.Status,                         // label: status
+		).Set(float64(count))
 	}
 
 	for _, job := range jobs {

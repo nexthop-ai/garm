@@ -45,6 +45,7 @@ func RegisterMetrics() error {
 		//
 		// runner metrics
 		InstanceStatus,
+		InstanceCount,
 		// organization metrics
 		OrganizationInfo,
 		OrganizationPoolManagerStatus,
@@ -69,6 +70,8 @@ func RegisterMetrics() error {
 		ScaleSetMinIdleRunners,
 		ScaleSetDesiredRunnerCount,
 		ScaleSetBootstrapTimeout,
+		ScaleSetRunnerCount,
+		ScaleSetJobCount,
 		// health metrics
 		GarmHealth,
 		// cache consistency metrics
@@ -92,6 +95,7 @@ func RegisterMetrics() error {
 		GithubTokenExpirationTimestamp,
 		JobStatus,
 		ScaleSetJobStatus,
+		JobCount,
 		// webhook metrics
 		WebhooksReceived,
 
