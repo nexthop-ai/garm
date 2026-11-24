@@ -8,7 +8,7 @@ vi.mock('$app/navigation', () => ({
 	goto: vi.fn()
 }));
 
-vi.mock('$app/stores', () => ({}));
+vi.mock('$app/state', () => ({}));
 
 vi.mock('$lib/api/client.js', () => ({
 	garmApi: {

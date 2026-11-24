@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { garmApi } from '$lib/api/client.js';
-	import type { Instance, Job } from '$lib/api/generated/api.js';
-	import { buildJobsByRunner } from '$lib/utils/jobs.js';
+	import type { Instance } from '$lib/api/generated/api.js';
+	import { buildJobsByRunner, scaleSetJobEventPayload, type QueueJob as Job } from '$lib/utils/jobs.js';
 	import DeleteModal from '$lib/components/DeleteModal.svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import ShellTerminal from '$lib/components/ShellTerminal.svelte';
@@ -294,11 +294,26 @@
 			handleInstanceEvent
 		);
 
-		unsubscribeJobsWebsocket = websocketStore.subscribeToEntity(
+		// Webhook jobs and scale set jobs are separate entities, each with its
+		// own event stream.
+		const unsubscribeWebhookJobs = websocketStore.subscribeToEntity(
 			'job',
 			['create', 'update', 'delete'],
 			handleJobEvent
 		);
+		const unsubscribeScaleSetJobs = websocketStore.subscribeToEntity(
+			'scaleset_job',
+			['create', 'update', 'delete'],
+			(event) =>
+				handleJobEvent({
+					...event,
+					payload: scaleSetJobEventPayload(event.operation, event.payload)
+				})
+		);
+		unsubscribeJobsWebsocket = () => {
+			unsubscribeWebhookJobs();
+			unsubscribeScaleSetJobs();
+		};
 
 		// Update current time every second for heartbeat staleness check
 		heartbeatCheckInterval = setInterval(() => {

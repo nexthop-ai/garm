@@ -1,10 +1,10 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
-	import type { Instance, Job } from '$lib/api/generated/api.js';
+	import type { Instance } from '$lib/api/generated/api.js';
 	import { resolve } from '$app/paths';
 	import { garmApi } from '$lib/api/client.js';
 	import { websocketStore, type WebSocketEvent } from '$lib/stores/websocket.js';
-	import { buildJobsByRunner } from '$lib/utils/jobs.js';
+	import { buildJobsByRunner, scaleSetJobEventPayload, type QueueJob as Job } from '$lib/utils/jobs.js';
 	import DataTable from './DataTable.svelte';
 	import { EntityCell, StatusCell, GenericCell, ActionsCell } from './cells';
 
@@ -40,11 +40,26 @@
 
 	onMount(() => {
 		loadJobs();
-		unsubscribeJobs = websocketStore.subscribeToEntity(
+		// Webhook jobs and scale set jobs are separate entities, each with its
+		// own event stream.
+		const unsubscribeWebhookJobs = websocketStore.subscribeToEntity(
 			'job',
 			['create', 'update', 'delete'],
 			handleJobEvent
 		);
+		const unsubscribeScaleSetJobs = websocketStore.subscribeToEntity(
+			'scaleset_job',
+			['create', 'update', 'delete'],
+			(event) =>
+				handleJobEvent({
+					...event,
+					payload: scaleSetJobEventPayload(event.operation, event.payload)
+				})
+		);
+		unsubscribeJobs = () => {
+			unsubscribeWebhookJobs();
+			unsubscribeScaleSetJobs();
+		};
 	});
 
 	onDestroy(() => {

@@ -2,12 +2,12 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { resolve } from '$app/paths';
 	import { garmApi } from '$lib/api/client.js';
-	import type { Instance, Job, Pool, RunnerScaleSetStatistic, ScaleSet } from '$lib/api/generated/api.js';
+	import type { Instance, Pool, RunnerScaleSetStatistic, ScaleSet } from '$lib/api/generated/api.js';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import { websocketStore, type WebSocketEvent } from '$lib/stores/websocket.js';
 	import { eagerCacheManager } from '$lib/stores/eager-cache.js';
 	import { getEntityName } from '$lib/utils/common.js';
-	import { jobUrl } from '$lib/utils/jobs.js';
+	import { jobUrl, scaleSetJobEventPayload, type QueueJob as Job } from '$lib/utils/jobs.js';
 
 	let jobs: Job[] = [];
 	let scaleSets: ScaleSet[] = [];
@@ -17,6 +17,7 @@
 	let error = '';
 	let searchTerm = '';
 	let unsubscribeWebsocket: (() => void) | null = null;
+	let unsubscribeScaleSetJobWebsocket: (() => void) | null = null;
 	let unsubscribeInstanceWebsocket: (() => void) | null = null;
 
 	// Current time, refreshed periodically so "waiting for" durations stay fresh.
@@ -251,6 +252,17 @@
 			handleJobEvent
 		);
 
+		// Scale set jobs are a separate entity with their own event stream.
+		unsubscribeScaleSetJobWebsocket = websocketStore.subscribeToEntity(
+			'scaleset_job',
+			['create', 'update', 'delete'],
+			(event) =>
+				handleJobEvent({
+					...event,
+					payload: scaleSetJobEventPayload(event.operation, event.payload)
+				})
+		);
+
 		unsubscribeInstanceWebsocket = websocketStore.subscribeToEntity(
 			'instance',
 			['create', 'update', 'delete'],
@@ -266,6 +278,10 @@
 		if (unsubscribeWebsocket) {
 			unsubscribeWebsocket();
 			unsubscribeWebsocket = null;
+		}
+		if (unsubscribeScaleSetJobWebsocket) {
+			unsubscribeScaleSetJobWebsocket();
+			unsubscribeScaleSetJobWebsocket = null;
 		}
 		if (unsubscribeInstanceWebsocket) {
 			unsubscribeInstanceWebsocket();

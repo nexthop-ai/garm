@@ -24,6 +24,7 @@ import {
   JobsApi,
   type GARMAgentRelease,
   type Job,
+  type ScaleSetJob,
   type Repository,
   type Organization,
   type Enterprise,
@@ -69,6 +70,7 @@ import {
   type RestoreTemplateRequest,
   Configuration
 } from './generated/index';
+import { fromScaleSetJob, type QueueJob } from '$lib/utils/jobs.js';
 
 // Re-export types for compatibility
 export type {
@@ -663,9 +665,29 @@ export class GeneratedGarmApiClient {
   }
 
   // Jobs
-  async listJobs(): Promise<Job[]> {
-    const response = await this.jobsApi.listJobs();
-    return response.data || [];
+  // Queued and in-progress jobs of both kinds: webhook jobs (pools) and
+  // scale set jobs, the latter converted to the same shape. Each kind has its
+  // own paginated endpoint; completed jobs are left out.
+  async listJobs(): Promise<QueueJob[]> {
+    const pageSize = 500;
+    const fetchAll = async <T>(
+      fetchPage: (page: number) => Promise<{ results?: T[]; next_page?: number }>
+    ): Promise<T[]> => {
+      const all: T[] = [];
+      for (let page = 1; page; ) {
+        const data = await fetchPage(page);
+        all.push(...(data.results || []));
+        page = data.next_page && data.next_page > page ? data.next_page : 0;
+      }
+      return all;
+    };
+    const [webhookJobs, scaleSetJobs] = await Promise.all([
+      fetchAll<Job>(async (page) => (await this.jobsApi.listJobs(page, pageSize)).data as any),
+      fetchAll<ScaleSetJob>(
+        async (page) => (await this.scaleSetsApi.listAllScaleSetJobs(page, pageSize)).data as any
+      )
+    ]);
+    return [...webhookJobs, ...scaleSetJobs.map(fromScaleSetJob)];
   }
 
   // Instances
