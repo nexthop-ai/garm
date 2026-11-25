@@ -791,6 +791,26 @@ func (s *PoolStressTestSuite) TestPersistJobToDB_AllowsForwardTransitions() {
 	}
 }
 
+// TestHandleWorkflowJobStoresForgeCreatedAt verifies that a job's CreatedAt is
+// the forge's created_at from the webhook rather than the time GARM stored it.
+func (s *PoolStressTestSuite) TestHandleWorkflowJobStoresForgeCreatedAt() {
+	labels := []string{"self-hosted", "linux", "x64"}
+	createdAt := time.Date(2026, 7, 29, 10, 0, 0, 0, time.UTC)
+
+	queuedJob := s.makeWorkflowJob(2201, "queued", "queued", "", labels)
+	queuedJob.WorkflowJob.CreatedAt = createdAt
+
+	jobParams, err := s.mgr.paramsWorkflowJobToParamsJob(queuedJob)
+	s.Require().NoError(err)
+	s.True(jobParams.CreatedAt.Equal(createdAt), "CreatedAt = %v, want %v", jobParams.CreatedAt, createdAt)
+
+	s.Require().NoError(s.mgr.HandleWorkflowJob(queuedJob))
+
+	stored, err := s.store.GetJobByID(s.adminCtx, 2201)
+	s.Require().NoError(err)
+	s.True(stored.CreatedAt.Equal(createdAt), "stored CreatedAt = %v, want %v", stored.CreatedAt, createdAt)
+}
+
 func mustParseUUID(s string) uuid.UUID {
 	u, err := uuid.Parse(s)
 	if err != nil {

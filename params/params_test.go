@@ -15,7 +15,9 @@
 package params
 
 import (
+	"encoding/json"
 	"testing"
+	"time"
 )
 
 func TestPool_HasRequiredLabels(t *testing.T) {
@@ -238,5 +240,50 @@ func TestScaleSetHasRequiredLabels(t *testing.T) {
 				t.Errorf("HasRequiredLabels(%v) = %v, want %v", tc.labels, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestWorkflowJobUnmarshalTimestamps ensures the webhook payload keeps the
+// forge supplied created_at, which becomes the job's CreatedAt.
+func TestWorkflowJobUnmarshalTimestamps(t *testing.T) {
+	payload := []byte(`{
+		"action": "in_progress",
+		"workflow_job": {
+			"id": 1234,
+			"run_id": 5678,
+			"status": "in_progress",
+			"created_at": "2026-07-29T10:00:00Z",
+			"started_at": "2026-07-29T10:05:00Z",
+			"completed_at": null,
+			"labels": ["self-hosted", "linux"],
+			"runner_name": "garm-runner-1"
+		}
+	}`)
+
+	var job WorkflowJob
+	if err := json.Unmarshal(payload, &job); err != nil {
+		t.Fatalf("unmarshalling workflow job: %v", err)
+	}
+
+	wantCreated := time.Date(2026, 7, 29, 10, 0, 0, 0, time.UTC)
+	wantStarted := time.Date(2026, 7, 29, 10, 5, 0, 0, time.UTC)
+
+	if !job.WorkflowJob.CreatedAt.Equal(wantCreated) {
+		t.Errorf("created_at = %v, want %v", job.WorkflowJob.CreatedAt, wantCreated)
+	}
+	if !job.WorkflowJob.StartedAt.Equal(wantStarted) {
+		t.Errorf("started_at = %v, want %v", job.WorkflowJob.StartedAt, wantStarted)
+	}
+}
+
+// TestWorkflowJobUnmarshalMissingCreatedAt documents that an absent created_at
+// leaves a zero timestamp, which the database replaces with the insert time.
+func TestWorkflowJobUnmarshalMissingCreatedAt(t *testing.T) {
+	var job WorkflowJob
+	if err := json.Unmarshal([]byte(`{"action":"in_progress","workflow_job":{"id":1}}`), &job); err != nil {
+		t.Fatalf("unmarshalling workflow job: %v", err)
+	}
+	if !job.WorkflowJob.CreatedAt.IsZero() {
+		t.Errorf("created_at = %v, want zero value", job.WorkflowJob.CreatedAt)
 	}
 }
