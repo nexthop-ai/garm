@@ -447,7 +447,23 @@ func (w *Worker) markRunnerPendingDelete(runnerName string) error {
 	return nil
 }
 
-func (w *Worker) removeRunnerFromGithubAndSetPendingDelete(runnerName string, agentID int64) error {
+// errJobStillRunning is returned when github refuses to deregister a runner
+// because it has a job running on it, and the caller asked to keep the
+// instance in that case.
+var errJobStillRunning = errors.New("github reports a job still running on the runner")
+
+// isJobStillRunningError reports whether github refused to deregister a runner
+// because it believes a job is running on it. The actions service answers
+// with a 400 whose body names the exception.
+func isJobStillRunningError(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "TaskAgentJobStillRunningException")
+}
+
+// removeRunnerFromGithubAndSetPendingDelete deregisters the runner from github
+// and marks its instance pending_delete. With keepIfJobRunning set, a refusal
+// from github because a job is running on the runner leaves the instance
+// alone and returns errJobStillRunning.
+func (w *Worker) removeRunnerFromGithubAndSetPendingDelete(runnerName string, agentID int64, keepIfJobRunning bool) error {
 	scaleSetCli, err := w.GetScaleSetClient()
 	if err != nil {
 		return fmt.Errorf("getting scale set client: %w", err)
@@ -459,6 +475,9 @@ func (w *Worker) removeRunnerFromGithubAndSetPendingDelete(runnerName string, ag
 			// the instance and retry on a later pass, rather than destroying
 			// a runner github may still be using.
 			return fmt.Errorf("removing runner %s: %w", runnerName, err)
+		}
+		if keepIfJobRunning && isJobStillRunningError(err) {
+			return fmt.Errorf("removing runner %s: %w", runnerName, errJobStillRunning)
 		}
 		if !errors.Is(err, runnerErrors.ErrNotFound) {
 			// Github may refuse to deregister a runner it believes is running a
@@ -609,7 +628,23 @@ func (w *Worker) reapTimedOutRunners(runners map[string]params.RunnerReference) 
 				"runner_name", runner.Name)
 		}
 
-		if err := w.removeRunnerFromGithubAndSetPendingDelete(runner.Name, runner.AgentID); err != nil {
+		// "Offline" comes from github's runner list, which has reported healthy,
+		// busy runners as offline for half an hour at a time (2026-11-25:
+		// reaping on it killed about 100 running jobs). Github refusing to
+		// deregister the runner because a job is running on it is the better
+		// signal, so a bootstrapped runner that is only offline is kept and
+		// tried again on the next pass. A runner that really died mid-job is
+		// released by github about ten minutes later, when it fails the job.
+		keepIfJobRunning := offlineTimedOut && !bootstrapTimedOut
+		if err := w.removeRunnerFromGithubAndSetPendingDelete(runner.Name, runner.AgentID, keepIfJobRunning); err != nil {
+			if errors.Is(err, errJobStillRunning) {
+				slog.InfoContext(
+					w.ctx, "github reports a job still running on offline runner; not reaping",
+					"runner_name", runner.Name,
+					"offline_for", time.Since(w.offlineSince[runner.Name]).String())
+				locking.Unlock(runner.Name, false)
+				continue
+			}
 			// Don't let a single poisoned runner (e.g. one that raced into a
 			// status that can no longer transition to pending_delete through
 			// some other codepath) abort reaping for the rest of the batch.
@@ -952,7 +987,7 @@ func (w *Worker) consolidateProviderState() error {
 		if _, ok := providerRunnersByName[runner.Name]; !ok {
 			// The runner is not in the provider anymore. Remove it from the DB.
 			slog.InfoContext(w.ctx, "runner does not exist in provider; removing from database", "runner_name", runner.Name)
-			if err := w.removeRunnerFromGithubAndSetPendingDelete(runner.Name, runner.AgentID); err != nil {
+			if err := w.removeRunnerFromGithubAndSetPendingDelete(runner.Name, runner.AgentID, false); err != nil {
 				// Same reasoning as reapTimedOutRunners and the github cross
 				// check above: one poisoned runner must not abort the sweep
 				// for the rest of the scale set. Log it and keep going.

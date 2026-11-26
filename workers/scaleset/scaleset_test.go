@@ -137,3 +137,20 @@ func TestSyncRunnersFromDB(t *testing.T) {
 	require.Contains(t, w.offlineSince, "runner-live")
 	require.NotContains(t, w.offlineSince, "runner-stale")
 }
+
+// TestIsJobStillRunningError checks the refusal github sends when asked to
+// deregister a runner with a job on it is recognised through the wrapping the
+// scale set client and the worker add, and that other failures are not.
+func TestIsJobStillRunningError(t *testing.T) {
+	url := "https://broker.actions.githubusercontent.com/rest/_apis/distributedtask/pools/0/agents/42?api-version=6.0-preview"
+	body := `{"$id":"1","innerException":null,"message":"Job is still running for agent 42.","typeName":"GitHub.DistributedTask.WebApi.TaskAgentJobStillRunningException, GitHub.DistributedTask.WebApi","typeKey":"TaskAgentJobStillRunningException","errorCode":0,"eventId":3000}`
+	refusal := fmt.Errorf("request failed for %s: %w", url,
+		runnerErrors.NewBadRequestError("bad request while calling %s: %q", url, body))
+
+	require.True(t, isJobStillRunningError(refusal))
+	require.True(t, isJobStillRunningError(fmt.Errorf("removing runner runner-1: %w", refusal)))
+
+	require.False(t, isJobStillRunningError(nil))
+	require.False(t, isJobStillRunningError(runnerErrors.ErrNotFound))
+	require.False(t, isJobStillRunningError(runnerErrors.NewBadRequestError("bad request while calling %s: %q", url, `{"typeKey":"TaskAgentNotFoundException"}`)))
+}
