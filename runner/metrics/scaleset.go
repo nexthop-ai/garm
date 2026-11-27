@@ -32,6 +32,7 @@ func CollectScaleSetMetric(ctx context.Context, r *runner.Runner) error {
 	metrics.ScaleSetMinIdleRunners.Reset()
 	metrics.ScaleSetDesiredRunnerCount.Reset()
 	metrics.ScaleSetBootstrapTimeout.Reset()
+	metrics.ResetScaleSetGHStatistics()
 
 	scaleSets, err := r.ListAllScaleSets(ctx)
 	if err != nil {
@@ -93,6 +94,10 @@ func CollectScaleSetMetric(ctx context.Context, r *runner.Runner) error {
 		metrics.ScaleSetBootstrapTimeout.WithLabelValues(
 			id,
 		).Set(float64(scaleSet.RunnerBootstrapTimeout))
+
+		// Statistics is nil until the listener has seen its first message queue
+		// response, so a freshly created scale set simply reports no gh_ series.
+		metrics.RecordScaleSetGHStatistics(scaleSet.Name, scaleSet.ProviderName, scaleSet.Statistics)
 	}
 	return nil
 }
