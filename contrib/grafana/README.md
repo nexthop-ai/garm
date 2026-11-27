@@ -8,7 +8,7 @@ VictoriaMetrics, Thanos).
 | Dashboard | File | What it answers |
 | ----------- | ------ | ----------------- |
 | GARM / Fleet Overview | `dashboards/garm-fleet-overview.json` | Is the fleet healthy, how much capacity is in use, why are runners being removed |
-| GARM / Jobs & SLOs | `dashboards/garm-jobs.json` | How long do jobs wait for runners, throughput and success rates per owner/repo |
+| GARM / Jobs & SLOs | `dashboards/garm-jobs.json` | How long do jobs wait for runners (overall and per requested label set), throughput and success rates per owner/repo |
 | GARM / Pools & Scale Sets | `dashboards/garm-pools-scalesets.json` | Per-pool utilization and provider health, scale set demand and listener freshness |
 | GARM / Control Plane | `dashboards/garm-control-plane.json` | Watcher pipeline health, forge API usage and errors, provider latency |
 

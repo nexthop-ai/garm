@@ -65,6 +65,28 @@
         "options": [],
         "regex": "",
         "hide": 0
+      },
+      {
+        "name": "requested_labels",
+        "label": "Requested labels",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "query": {
+          "query": "label_values(garm_job_queue_duration_seconds_count{owner=~\"$owner\"}, requested_labels)",
+          "refId": "var-requested_labels"
+        },
+        "refresh": 2,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "sort": 1,
+        "current": {},
+        "options": [],
+        "regex": "",
+        "hide": 0
       }
     ]
   },
@@ -1506,6 +1528,78 @@
             },
             "renameByName": {}
           }
+        }
+      ]
+    },
+    {
+      "id": 113,
+      "type": "timeseries",
+      "title": "Queue time p95 by requested labels",
+      "description": "p95 queue time per requested label set, so a starved runner type stands out instead of being averaged away. Label sets are normalized (lowercased, sorted, comma joined).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 38
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "pointSize": 5,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "gradientMode": "opacity",
+            "axisSoftMin": 0
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le, requested_labels) (rate(garm_job_queue_duration_seconds_bucket{owner=~\"$owner\", requested_labels=~\"$requested_labels\"}[$__rate_interval])))",
+          "legendFormat": "{{requested_labels}}",
+          "refId": "A"
         }
       ]
     }

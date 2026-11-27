@@ -15,6 +15,9 @@
 package metrics
 
 import (
+	"slices"
+	"strings"
+
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -69,3 +72,25 @@ var JobCount = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 	Name:      "count",
 	Help:      "Count of jobs by status and entity",
 }, []string{"job_type", "status", "entity_type", "entity_name"})
+
+// NormalizeRequestedLabels renders a job's requested labels as a single, stable
+// label value. The labels are lowercased, since GitHub matches runner labels
+// case-insensitively and "Linux" must not split a series from "linux", and
+// sorted so that permutations of the same label set collapse into one series.
+//
+// Cardinality: GARM only records jobs whose labels match a pool's tags or that
+// ran on its pool runners, so every value is a subset of the labels operators
+// configure on pools (plus GARM's controller and pool ID runner labels).
+func NormalizeRequestedLabels(requestedLabels []string) string {
+	if len(requestedLabels) == 0 {
+		return ""
+	}
+	sorted := make([]string, 0, len(requestedLabels))
+	for _, lbl := range requestedLabels {
+		if lbl = strings.ToLower(strings.TrimSpace(lbl)); lbl != "" {
+			sorted = append(sorted, lbl)
+		}
+	}
+	slices.Sort(sorted)
+	return strings.Join(slices.Compact(sorted), ",")
+}
